@@ -1,18 +1,171 @@
-# Terraform Provider Scaffolding (Terraform Plugin Framework)
+# Terraform Provider Apicurio (Terraform Plugin Framework)
 
-_This template repository is built on the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework). The template repository built on the [Terraform Plugin SDK](https://github.com/hashicorp/terraform-plugin-sdk) can be found at [terraform-provider-scaffolding](https://github.com/hashicorp/terraform-provider-scaffolding). See [Which SDK Should I Use?](https://developer.hashicorp.com/terraform/plugin/framework-benefits) in the Terraform documentation for additional information._
+Terraform provider for managing Apicurio Registry artifacts using **Core Registry API v2 semantics** (group/artifactId/custom version string/labels).
 
-This repository is a *template* for a [Terraform](https://www.terraform.io) provider. It is intended as a starting point for creating Terraform providers, containing:
+This is designed for organizations that:
+- organize artifacts by `group_id` and `artifact_id`
+- use version strings like `v1`, `v2` (not numeric Schema Registry versions)
+- want Apicurio UI to show `<group> / <artifactId>` with `name` defaulting to `artifact_id`
 
-- A resource and a data source (`internal/provider/`),
-- Examples (`examples/`) and generated documentation (`docs/`),
-- Miscellaneous meta files.
+## Requirements
 
-These files contain boilerplate code that you will need to edit to create your own Terraform provider. Tutorials for creating Terraform providers can be found on the [HashiCorp Developer](https://developer.hashicorp.com/terraform/tutorials/providers-plugin-framework) platform. _Terraform Plugin Framework specific guides are titled accordingly._
+- Terraform >= 1.0
+- Go >= 1.24
 
-Please see the [GitHub template repository documentation](https://help.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template) for how to create a new repository from this template on GitHub.
+## Architecture overview
 
-Once you've written your provider, you'll want to [publish it on the Terraform Registry](https://developer.hashicorp.com/terraform/registry/providers/publishing) so that others can use it.
+- Provider implementation: `internal/provider/provider.go`
+- Main entrypoint: `cmd/terraform-provider-apicurio/main.go`
+- Registry abstraction: `internal/client/client.go` (`RegistryClient` interface)
+- v2 implementation: `internal/client/v2.go` (Core API v2)
+- v3 fallback: `internal/client/v3.go` (currently delegates to v2 semantics; keeps the abstraction layer in place)
+
+The provider can be pinned to an Apicurio API flavor via `api_version` (`v2` or `v3`).
+
+If `api_version` is not set, the provider defaults to `v3` and will best-effort probe:
+- tries `GET {endpoint}/apis/registry/v3/system/info`
+- else tries `GET {endpoint}/apis/registry/v2/system/info`
+- defaults to `v3` if probing fails (best-effort)
+
+## Provider configuration
+
+```hcl
+provider "apicurio" {
+	endpoint = "http://localhost:3080"
+	# api_version = "v3" # optional; "v2" or "v3" (default "v3")
+
+	# Optional auth (choose one)
+	# token       = var.apicurio_token
+	# auth_header = "Authorization: Bearer ${var.apicurio_token}"
+
+	# basic_auth = {
+	#   username = var.apicurio_username
+	#   password = var.apicurio_password
+	# }
+
+	# oidc = {
+	#   token_url      = "https://keycloak.example/realms/myrealm/protocol/openid-connect/token"
+	#   client_id      = var.keycloak_client_id
+	#   client_secret  = var.keycloak_client_secret
+	#   scopes         = ["openid"]
+	#   extra_params   = { audience = "apicurio" }
+	#   auth_style     = "auto" # or "in_header" / "in_params"
+	# }
+
+	# Optional TLS
+	# insecure_skip_verify = true
+	# ca_bundle_path       = "/path/to/ca-bundle.pem"
+}
+```
+
+## Resource: `apicurio_artifact`
+
+Manages an artifact and its versions.
+
+```hcl
+resource "apicurio_artifact" "example" {
+	group_id      = "com.example.common.v1"
+	artifact_id   = "ErrorCommonMessage"
+	artifact_type = "AVRO" # default
+
+	# Exactly one:
+	content      = file("schemas/com.example.common.v1/ErrorCommonMessage.json")
+	# content_file = "schemas/com.example.common.v1/ErrorCommonMessage.json"
+
+	version = "v1"
+
+	# Defaults to artifact_id (keeps UI clean)
+	# name        = "ErrorCommonMessage"
+	description = "Shared error envelope"
+
+	labels = [
+		"com.example.control.pravidla.otk.v1.public.error",
+		"com.example.control.pravidla.ai.v1.public.error",
+	]
+
+	hard_delete = false
+}
+```
+
+Import format:
+
+```bash
+terraform import apicurio_artifact.example "<group_id>/<artifact_id>"
+```
+
+## Resource: `apicurio_rule`
+
+Manages a rule either globally or for a specific artifact.
+
+```hcl
+resource "apicurio_rule" "artifact_compatibility" {
+	scope       = "artifact"
+	group_id    = "com.example.common.v1"
+	artifact_id = "ErrorCommonMessage"
+
+	rule_type = "COMPATIBILITY"
+	config    = "BACKWARD"
+}
+```
+
+Import formats:
+
+```bash
+terraform import apicurio_rule.artifact_compatibility "<group_id>/<artifact_id>/<rule_type>"
+terraform import apicurio_rule.some_global_rule "global/<rule_type>"
+```
+
+## API call mapping (Core API v2)
+
+The provider uses these endpoints when available under `/apis/registry/v2`:
+
+- Create artifact:
+	- `POST /apis/registry/v2/groups/{group}/artifacts`
+	- headers:
+		- `X-Registry-ArtifactId: {artifact_id}`
+		- `X-Registry-ArtifactType: {artifact_type}`
+		- `X-Registry-Version: {version}` (if set)
+	- body: raw content
+- Update metadata:
+	- `PUT /apis/registry/v2/groups/{group}/artifacts/{artifact}/meta`
+	- body includes `name`, `description`, and `labels`
+	- labels are sent as an object map of keys -> null (so Apicurio UI shows label keys)
+- Read metadata:
+	- `GET /apis/registry/v2/groups/{group}/artifacts/{artifact}/meta`
+- Read latest content (best-effort for drift hash):
+	- `GET /apis/registry/v2/groups/{group}/artifacts/{artifact}`
+- Create new version:
+	- `POST /apis/registry/v2/groups/{group}/artifacts/{artifact}/versions`
+	- header `X-Registry-Version: {version}` if provided
+- Check if a version exists:
+	- `GET /apis/registry/v2/groups/{group}/artifacts/{artifact}/versions/{version}/meta`
+- Delete a specific version (used when `allow_overwrite_version=true`):
+	- `DELETE /apis/registry/v2/groups/{group}/artifacts/{artifact}/versions/{version}`
+- Delete artifact:
+	- `DELETE /apis/registry/v2/groups/{group}/artifacts/{artifact}?hardDelete=true` (if `hard_delete`)
+
+## v3 fallback strategy
+
+On servers that report a v3 system endpoint, the provider currently still performs CRUD using Core API v2 semantics (many Apicurio v3 deployments expose v2 Core API endpoints).
+
+If you encounter a v3-only server where v2 endpoints are truly absent, extend `internal/client/v3.go` to map the `RegistryClient` interface to the correct v3 paths without changing provider/resource code.
+
+## Build and run locally
+
+Build the provider binary:
+
+```bash
+go build -o terraform-provider-apicurio ./cmd/terraform-provider-apicurio
+```
+
+Run acceptance tests against a local Apicurio at `http://localhost:3080`:
+
+```bash
+export APICURIO_ENDPOINT="http://localhost:3080"
+# export APICURIO_TOKEN="..."   # optional
+# export APICURIO_AUTH_HEADER="Authorization: Bearer ..."  # optional
+go test ./... -run TestAccApicurioArtifact_basic
+```
 
 ## Requirements
 
