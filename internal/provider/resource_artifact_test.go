@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,6 +60,14 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 				ImportState:       true,
 				ImportStateId:     fmt.Sprintf("%s/%s", groupID, artifactID),
 				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					// Config-only inputs can't be inferred during import.
+					"allow_overwrite_version",
+					"hard_delete",
+					"artifact_type",
+					"version",
+					"content",
+				},
 			},
 			{
 				Config: testAccApicurioArtifactConfig(endpoint, groupID, artifactID, content2, true),
@@ -225,6 +234,7 @@ func testAccApicurioArtifactContentFileConfig(endpoint, groupID, artifactID, con
 	if len(labels) > 0 {
 		labelsHCL = "[\n"
 		for _, l := range labels {
+			l = strings.TrimSpace(l)
 			labelsHCL += fmt.Sprintf("    %q,\n", l)
 		}
 		labelsHCL += "  ]"

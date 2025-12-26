@@ -150,6 +150,8 @@ data "apicurio_rule" "test" {
   group_id    = apicurio_artifact.test.group_id
   artifact_id = apicurio_artifact.test.artifact_id
   rule_type   = %q
+
+	depends_on = [apicurio_rule.test]
 }
 `, endpoint, authBlock, apiVersionBlock, groupID, artifactID, content, ruleType, ruleConfig, ruleType)
 }

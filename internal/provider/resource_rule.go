@@ -159,7 +159,7 @@ func (r *ruleResource) Create(ctx context.Context, req resource.CreateRequest, r
 
 	if !enabled {
 		// Disabled means ensure it doesn't exist, but keep Terraform state.
-		if derr := r.deleteRule(ctx, scope, groupID, artifactID, ruleType); derr != nil && !derr.IsNotFound() {
+		if derr := r.deleteRule(ctx, scope, groupID, artifactID, ruleType); derr != nil && derr.StatusCode != 409 && !derr.IsNotFound() {
 			resp.Diagnostics.AddError("Delete failed", formatClientError("unable to delete rule", derr))
 			return
 		}
@@ -188,6 +188,12 @@ func (r *ruleResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	var state ruleResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// When disabled, intentionally do not reconcile with remote state.
+	if !state.Enabled.IsNull() && !state.Enabled.IsUnknown() && !state.Enabled.ValueBool() {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 		return
 	}
 
@@ -271,7 +277,7 @@ func (r *ruleResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	if !enabled {
-		if derr := r.deleteRule(ctx, scope, groupID, artifactID, ruleType); derr != nil && !derr.IsNotFound() {
+		if derr := r.deleteRule(ctx, scope, groupID, artifactID, ruleType); derr != nil && derr.StatusCode != 409 && !derr.IsNotFound() {
 			resp.Diagnostics.AddError("Delete failed", formatClientError("unable to delete rule", derr))
 			return
 		}
@@ -314,6 +320,9 @@ func (r *ruleResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	}
 
 	if derr := r.deleteRule(ctx, scope, groupID, artifactID, ruleType); derr != nil {
+		if scope == "global" && derr.StatusCode == 409 {
+			return
+		}
 		resp.Diagnostics.AddError("Delete failed", formatClientError("unable to delete rule", derr))
 		return
 	}

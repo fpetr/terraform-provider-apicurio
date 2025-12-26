@@ -82,13 +82,18 @@ func (c *v2Client) UpdateArtifactMeta(ctx context.Context, groupID, artifactID s
 		payload["description"] = *meta.Description
 	}
 	if meta.Labels != nil {
-		labels := map[string]*string{}
+		labels := make([]string, 0, len(meta.Labels))
+		seen := map[string]struct{}{}
 		for _, l := range meta.Labels {
 			l = strings.TrimSpace(l)
 			if l == "" {
 				continue
 			}
-			labels[l] = nil
+			if _, ok := seen[l]; ok {
+				continue
+			}
+			seen[l] = struct{}{}
+			labels = append(labels, l)
 		}
 		payload["labels"] = labels
 	}
@@ -165,7 +170,7 @@ func (c *v2Client) DeleteArtifact(ctx context.Context, groupID, artifactID strin
 }
 
 func (c *v2Client) GetGlobalRule(ctx context.Context, ruleType string) (string, *ResponseError) {
-	u := c.base() + "/rules/" + url.PathEscape(ruleType)
+	u := c.base() + "/admin/rules/" + url.PathEscape(ruleType)
 	resp, err := c.doRaw(ctx, http.MethodGet, u, nil, nil)
 	if err != nil {
 		return "", err
@@ -180,12 +185,21 @@ func (c *v2Client) GetGlobalRule(ctx context.Context, ruleType string) (string, 
 }
 
 func (c *v2Client) PutGlobalRule(ctx context.Context, ruleType, config string) *ResponseError {
-	u := c.base() + "/rules/" + url.PathEscape(ruleType)
-	return c.putRuleConfig(ctx, u, config)
+	updateURL := c.base() + "/admin/rules/" + url.PathEscape(ruleType)
+	if err := c.putRuleConfig(ctx, updateURL, config); err != nil {
+		if err.StatusCode == http.StatusNotFound {
+			createURL := c.base() + "/admin/rules"
+			if cerr := c.postRuleConfig(ctx, createURL, ruleType, config); cerr == nil {
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *v2Client) DeleteGlobalRule(ctx context.Context, ruleType string) *ResponseError {
-	u := c.base() + "/rules/" + url.PathEscape(ruleType)
+	u := c.base() + "/admin/rules/" + url.PathEscape(ruleType)
 	resp, err := c.doRaw(ctx, http.MethodDelete, u, nil, nil)
 	if err != nil {
 		return err
@@ -215,8 +229,17 @@ func (c *v2Client) GetArtifactRule(ctx context.Context, groupID, artifactID, rul
 }
 
 func (c *v2Client) PutArtifactRule(ctx context.Context, groupID, artifactID, ruleType, config string) *ResponseError {
-	u := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID) + "/rules/" + url.PathEscape(ruleType)
-	return c.putRuleConfig(ctx, u, config)
+	updateURL := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID) + "/rules/" + url.PathEscape(ruleType)
+	if err := c.putRuleConfig(ctx, updateURL, config); err != nil {
+		if err.StatusCode == http.StatusNotFound {
+			createURL := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID) + "/rules"
+			if cerr := c.postRuleConfig(ctx, createURL, ruleType, config); cerr == nil {
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *v2Client) DeleteArtifactRule(ctx context.Context, groupID, artifactID, ruleType string) *ResponseError {
@@ -244,6 +267,27 @@ func (c *v2Client) putRuleConfig(ctx context.Context, urlStr, config string) *Re
 	resp, rerr := c.doRaw(ctx, http.MethodPut, urlStr, headers, bytes.NewReader(b))
 	if rerr != nil {
 		return rerr
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}
+	}
+	return nil
+}
+
+func (c *v2Client) postRuleConfig(ctx context.Context, urlStr, ruleType, config string) *ResponseError {
+	payload := map[string]any{"type": ruleType, "config": config}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return &ResponseError{Err: err}
+	}
+	headers := map[string]string{"Content-Type": "application/json"}
+	resp, rerr := c.doRaw(ctx, http.MethodPost, urlStr, headers, bytes.NewReader(b))
+	if rerr != nil {
+		return rerr
+	}
+	if resp.StatusCode == http.StatusConflict {
+		// Already exists.
+		return nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}

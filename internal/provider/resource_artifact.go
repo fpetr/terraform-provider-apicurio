@@ -127,6 +127,10 @@ func (r *artifactResource) Schema(ctx context.Context, req resource.SchemaReques
 			"name": schema.StringAttribute{
 				MarkdownDescription: "Artifact display name. Defaults to `artifact_id` to avoid UI suffixes.",
 				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"description": schema.StringAttribute{
 				MarkdownDescription: "Artifact description.",
@@ -166,7 +170,6 @@ func (r *artifactResource) Schema(ctx context.Context, req resource.SchemaReques
 			"content_sha256": schema.StringAttribute{
 				MarkdownDescription: "SHA256 of the latest content in the registry (best-effort).",
 				Computed:            true,
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -213,15 +216,6 @@ func (r *artifactResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	if plan.Name.IsNull() || plan.Name.IsUnknown() {
 		if !plan.ArtifactID.IsNull() && !plan.ArtifactID.IsUnknown() {
 			plan.Name = plan.ArtifactID
-		}
-	}
-
-	// Pre-compute content_sha256 from config when possible.
-	if plan.ContentSHA256.IsNull() || plan.ContentSHA256.IsUnknown() {
-		content, diags := resolveContentFromPlan(plan)
-		resp.Diagnostics.Append(diags...)
-		if !resp.Diagnostics.HasError() {
-			plan.ContentSHA256 = types.StringValue(sha256hex(content))
 		}
 	}
 
@@ -295,12 +289,13 @@ func (r *artifactResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Refresh state.
+	// Refresh state (must return known values after apply).
 	state, d := r.readIntoState(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), plan)
 	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	state.ContentSHA256 = types.StringValue(sha256hex(content))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -329,7 +324,9 @@ func (r *artifactResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if cerr != nil {
 		resp.Diagnostics.AddWarning("Content read failed", formatClientError("unable to read artifact content to compute content_sha256", cerr))
 	} else {
-		state.ContentSHA256 = types.StringValue(sha256hex(content))
+		if state.ContentSHA256.IsNull() || state.ContentSHA256.IsUnknown() || strings.TrimSpace(state.ContentSHA256.ValueString()) == "" {
+			state.ContentSHA256 = types.StringValue(sha256hex(content))
+		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -414,7 +411,7 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 
-	// Refresh state.
+	// Refresh state (must return known values after apply).
 	newState, d := r.readIntoState(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), plan)
 	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
@@ -447,6 +444,11 @@ func (r *artifactResource) ImportState(ctx context.Context, req resource.ImportS
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("group_id"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("artifact_id"), parts[1])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+
+	// Defaults are not applied automatically during import.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("artifact_type"), "AVRO")...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_overwrite_version"), false)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("hard_delete"), false)...)
 }
 
 func (r *artifactResource) readIntoState(ctx context.Context, groupID, artifactID string, plan artifactResourceModel) (artifactResourceModel, diag.Diagnostics) {
@@ -482,22 +484,22 @@ func applyMetaToState(state artifactResourceModel, n client.NormalizedArtifactMe
 	if n.Description != "" {
 		state.Description = types.StringValue(n.Description)
 	}
-	if n.Labels != nil {
+	if n.Labels != nil && (state.Labels.IsNull() || state.Labels.IsUnknown()) {
 		state.Labels = stringsToSet(n.Labels)
 	}
-	if n.GlobalID != nil {
+	if n.GlobalID != nil && (state.GlobalID.IsNull() || state.GlobalID.IsUnknown()) {
 		state.GlobalID = types.Int64Value(*n.GlobalID)
 	}
-	if n.ContentID != nil {
+	if n.ContentID != nil && (state.ContentID.IsNull() || state.ContentID.IsUnknown()) {
 		state.ContentID = types.Int64Value(*n.ContentID)
 	}
-	if n.CreatedOn != nil {
+	if n.CreatedOn != nil && (state.CreatedOn.IsNull() || state.CreatedOn.IsUnknown() || strings.TrimSpace(state.CreatedOn.ValueString()) == "") {
 		state.CreatedOn = types.StringValue(n.CreatedOn.UTC().Format(time.RFC3339))
 	}
-	if n.ModifiedOn != nil {
+	if n.ModifiedOn != nil && (state.ModifiedOn.IsNull() || state.ModifiedOn.IsUnknown() || strings.TrimSpace(state.ModifiedOn.ValueString()) == "") {
 		state.ModifiedOn = types.StringValue(n.ModifiedOn.UTC().Format(time.RFC3339))
 	}
-	if strings.TrimSpace(n.LatestVersion) != "" {
+	if strings.TrimSpace(n.LatestVersion) != "" && (state.LatestVersion.IsNull() || state.LatestVersion.IsUnknown() || strings.TrimSpace(state.LatestVersion.ValueString()) == "") {
 		state.LatestVersion = types.StringValue(n.LatestVersion)
 	}
 	return state
