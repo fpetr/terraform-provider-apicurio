@@ -1,5 +1,7 @@
 # Code of Conduct
 
-HashiCorp Community Guidelines apply to you when interacting with the community here on GitHub and contributing code.
+Be respectful and constructive.
 
-Please read the full text at https://www.hashicorp.com/community-guidelines
+Harassment and abusive behavior are not tolerated.
+
+If you see unacceptable behavior, please open an issue or contact the repository owner.

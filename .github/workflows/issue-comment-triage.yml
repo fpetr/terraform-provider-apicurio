@@ -1,5 +1,4 @@
-# DO NOT EDIT - This GitHub Workflow is managed by automation
-# https://github.com/hashicorp/terraform-devex-repos
+# Removes the `waiting-response` label when someone comments on an issue/PR.
 name: Issue Comment Triage
 
 on:
