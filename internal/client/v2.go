@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 )
@@ -434,10 +433,4 @@ func firstNonNil(a, b *int64) *int64 {
 		return a
 	}
 	return b
-}
-
-func joinURL(base string, elems ...string) string {
-	u, _ := url.Parse(base)
-	u.Path = path.Join(append([]string{u.Path}, elems...)...)
-	return u.String()
 }

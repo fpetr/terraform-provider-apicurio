@@ -154,10 +154,10 @@ func New(ctx context.Context, cfg ClientConfig) (RegistryClient, diag.Diagnostic
 	}
 
 	// Best-effort capability detection (prefer v3 when not specified).
-	if ok, _ := probe(ctx, httpClient, endpoint+"/apis/registry/v3/system/info", cfg); ok {
+	if ok, _ := probe(ctx, httpClient, endpoint+"/apis/registry/v3/system/info"); ok {
 		return NewV3(endpoint, httpClient, cfg), diags
 	}
-	if ok, _ := probe(ctx, httpClient, endpoint+"/apis/registry/v2/system/info", cfg); ok {
+	if ok, _ := probe(ctx, httpClient, endpoint+"/apis/registry/v2/system/info"); ok {
 		return NewV2(endpoint, httpClient, cfg), diags
 	}
 
@@ -294,7 +294,7 @@ func newOIDCTokenSource(ctx context.Context, baseTransport http.RoundTripper, ti
 	return oauth2.ReuseTokenSource(nil, cc.TokenSource(ctx)), nil
 }
 
-func probe(ctx context.Context, httpClient *http.Client, url string, cfg ClientConfig) (bool, error) {
+func probe(ctx context.Context, httpClient *http.Client, url string) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, err
@@ -304,7 +304,7 @@ func probe(ctx context.Context, httpClient *http.Client, url string, cfg ClientC
 		return false, err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode >= 200 && resp.StatusCode < 300, nil
 }
 
@@ -349,8 +349,8 @@ func ValidateAuthHeader(authHeader string) error {
 }
 
 func ReadBodyLimited(r io.Reader) (string, error) {
-	const max = 64 * 1024
-	b, err := io.ReadAll(io.LimitReader(r, max))
+	const maxBodyBytes = 64 * 1024
+	b, err := io.ReadAll(io.LimitReader(r, maxBodyBytes))
 	if err != nil {
 		return "", err
 	}

@@ -578,10 +578,7 @@ func metadataDiffers(ctx context.Context, plan, state artifactResourceModel) boo
 	}
 	pLabels := normalizeStrings(setToStrings(ctx, plan.Labels))
 	sLabels := normalizeStrings(setToStrings(ctx, state.Labels))
-	if strings.Join(pLabels, "\n") != strings.Join(sLabels, "\n") {
-		return true
-	}
-	return false
+	return strings.Join(pLabels, "\n") != strings.Join(sLabels, "\n")
 }
 
 func normalizeStrings(in []string) []string {
