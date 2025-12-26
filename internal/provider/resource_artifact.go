@@ -279,14 +279,21 @@ func (r *artifactResource) Create(ctx context.Context, req resource.CreateReques
 		descPtr = &d
 	}
 	labels := setToStrings(ctx, plan.Labels)
-	_, merr := r.client.UpdateArtifactMeta(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), client.ArtifactMetaUpdate{
+	metaUpdate := client.ArtifactMetaUpdate{
 		Name:        &name,
 		Description: descPtr,
 		Labels:      labels,
-	})
+	}
+	_, merr := r.client.UpdateArtifactMeta(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), metaUpdate)
 	if merr != nil {
 		resp.Diagnostics.AddError("Metadata update failed", formatClientError("unable to update artifact metadata", merr))
 		return
+	}
+	if versionPtr != nil {
+		if _, verr := r.client.UpdateArtifactVersionMeta(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *versionPtr, metaUpdate); verr != nil {
+			resp.Diagnostics.AddError("Metadata update failed", formatClientError("unable to update artifact version metadata", verr))
+			return
+		}
 	}
 
 	// Refresh state (must return known values after apply).
@@ -351,19 +358,19 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 	oldHash := state.ContentSHA256.ValueString()
 	contentChanged := oldHash == "" || newHash != oldHash
 
+	var requestedVersion *string
+	if !plan.Version.IsNull() && !plan.Version.IsUnknown() {
+		v := strings.TrimSpace(plan.Version.ValueString())
+		if v != "" {
+			requestedVersion = &v
+		}
+	}
+
 	metadataChanged := metadataDiffers(ctx, plan, state)
 
 	if contentChanged {
-		var desiredVersion *string
-		if !plan.Version.IsNull() && !plan.Version.IsUnknown() {
-			v := strings.TrimSpace(plan.Version.ValueString())
-			if v != "" {
-				desiredVersion = &v
-			}
-		}
-
-		if desiredVersion != nil {
-			exists, eerr := r.client.VersionExists(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *desiredVersion)
+		if requestedVersion != nil {
+			exists, eerr := r.client.VersionExists(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *requestedVersion)
 			if eerr != nil {
 				resp.Diagnostics.AddError("Version check failed", formatClientError("unable to check version existence", eerr))
 				return
@@ -377,14 +384,14 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 				return
 			}
 			if exists && allowOverwrite {
-				if derr := r.client.DeleteArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *desiredVersion); derr != nil {
+				if derr := r.client.DeleteArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *requestedVersion); derr != nil {
 					resp.Diagnostics.AddError("Version delete failed", formatClientError("unable to delete existing version", derr))
 					return
 				}
 			}
 		}
 
-		if _, uerr := r.client.CreateArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), desiredVersion, content); uerr != nil {
+		if _, uerr := r.client.CreateArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), requestedVersion, content); uerr != nil {
 			resp.Diagnostics.AddError("Content update failed", formatClientError("unable to create new artifact version", uerr))
 			return
 		}
@@ -401,13 +408,20 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 			descPtr = &d
 		}
 		labels := setToStrings(ctx, plan.Labels)
-		if _, merr := r.client.UpdateArtifactMeta(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), client.ArtifactMetaUpdate{
+		metaUpdate := client.ArtifactMetaUpdate{
 			Name:        &name,
 			Description: descPtr,
 			Labels:      labels,
-		}); merr != nil {
+		}
+		if _, merr := r.client.UpdateArtifactMeta(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), metaUpdate); merr != nil {
 			resp.Diagnostics.AddError("Metadata update failed", formatClientError("unable to update artifact metadata", merr))
 			return
+		}
+		if requestedVersion != nil {
+			if _, verr := r.client.UpdateArtifactVersionMeta(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *requestedVersion, metaUpdate); verr != nil {
+				resp.Diagnostics.AddError("Metadata update failed", formatClientError("unable to update artifact version metadata", verr))
+				return
+			}
 		}
 	}
 
@@ -501,6 +515,24 @@ func applyMetaToState(state artifactResourceModel, n client.NormalizedArtifactMe
 	}
 	if strings.TrimSpace(n.LatestVersion) != "" && (state.LatestVersion.IsNull() || state.LatestVersion.IsUnknown() || strings.TrimSpace(state.LatestVersion.ValueString()) == "") {
 		state.LatestVersion = types.StringValue(n.LatestVersion)
+	}
+
+	// If the server omits some computed fields (common across API flavors), ensure we don't
+	// leave Unknown values in state after apply.
+	if state.GlobalID.IsUnknown() {
+		state.GlobalID = types.Int64Null()
+	}
+	if state.ContentID.IsUnknown() {
+		state.ContentID = types.Int64Null()
+	}
+	if state.CreatedOn.IsUnknown() {
+		state.CreatedOn = types.StringNull()
+	}
+	if state.ModifiedOn.IsUnknown() {
+		state.ModifiedOn = types.StringNull()
+	}
+	if state.LatestVersion.IsUnknown() {
+		state.LatestVersion = types.StringNull()
 	}
 	return state
 }

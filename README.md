@@ -129,7 +129,9 @@ The provider uses these endpoints when available under `/apis/registry/v2`:
 - Update metadata:
 	- `PUT /apis/registry/v2/groups/{group}/artifacts/{artifact}/meta`
 	- body includes `name`, `description`, and `labels`
-	- labels are sent as an object map of keys -> null (so Apicurio UI shows label keys)
+	- labels are sent as a string map (keys -> "true") with fallbacks to (keys -> null) and a string array (server-dependent)
+	- if `version` is set in the Terraform resource, the provider also updates that version metadata:
+		- `PUT /apis/registry/v2/groups/{group}/artifacts/{artifact}/versions/{version}/meta`
 - Read metadata:
 	- `GET /apis/registry/v2/groups/{group}/artifacts/{artifact}/meta`
 - Read latest content (best-effort for drift hash):
