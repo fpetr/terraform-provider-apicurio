@@ -104,6 +104,45 @@ func TestAccApicurioDataSourceRule_artifact_missing(t *testing.T) {
 	})
 }
 
+func TestAccApicurioDataSourceRule_global_exists(t *testing.T) {
+	endpoint := os.Getenv("APICURIO_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("set APICURIO_ENDPOINT to run acceptance tests")
+	}
+
+	if os.Getenv("APICURIO_TEST_RULES") != "1" {
+		t.Skip("set APICURIO_TEST_RULES=1 to run rule acceptance tests")
+	}
+
+	ruleType := os.Getenv("APICURIO_TEST_RULE_TYPE")
+	if ruleType == "" {
+		ruleType = "COMPATIBILITY"
+	}
+	ruleConfig := os.Getenv("APICURIO_TEST_GLOBAL_RULE_CONFIG1")
+	if ruleConfig == "" {
+		ruleConfig = "NONE"
+	}
+
+	resourceName := "data.apicurio_rule.test"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccApicurioDataSourceRuleGlobalConfig(endpoint, ruleType, ruleConfig),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "scope", "global"),
+					resource.TestCheckResourceAttr(resourceName, "rule_type", ruleType),
+					resource.TestCheckResourceAttr(resourceName, "enabled", "true"),
+					resource.TestCheckResourceAttr(resourceName, "config", ruleConfig),
+					resource.TestCheckResourceAttrSet(resourceName, "id"),
+				),
+			},
+		},
+	})
+}
+
 func testAccApicurioDataSourceRuleArtifactConfig(endpoint, groupID, artifactID, content, ruleType, ruleConfig string) string {
 	authHeader := os.Getenv("APICURIO_AUTH_HEADER")
 	token := os.Getenv("APICURIO_TOKEN")
@@ -187,4 +226,42 @@ data "apicurio_rule" "test" {
   rule_type   = %q
 }
 `, endpoint, authBlock, apiVersionBlock, groupID, artifactID, ruleType)
+}
+
+func testAccApicurioDataSourceRuleGlobalConfig(endpoint, ruleType, ruleConfig string) string {
+	authHeader := os.Getenv("APICURIO_AUTH_HEADER")
+	token := os.Getenv("APICURIO_TOKEN")
+	apiVersion := os.Getenv("APICURIO_API_VERSION")
+
+	authBlock := ""
+	if authHeader != "" {
+		authBlock = fmt.Sprintf("auth_header = %q", authHeader)
+	} else if token != "" {
+		authBlock = fmt.Sprintf("token = %q", token)
+	}
+
+	apiVersionBlock := ""
+	if apiVersion != "" {
+		apiVersionBlock = fmt.Sprintf("api_version = %q", apiVersion)
+	}
+	return fmt.Sprintf(`
+provider "apicurio" {
+  endpoint = %q
+  %s
+		%s
+}
+
+resource "apicurio_rule" "test" {
+  scope     = "global"
+  rule_type = %q
+  config    = %q
+}
+
+data "apicurio_rule" "test" {
+  scope     = "global"
+  rule_type = %q
+
+	depends_on = [apicurio_rule.test]
+}
+`, endpoint, authBlock, apiVersionBlock, ruleType, ruleConfig, ruleType)
 }
