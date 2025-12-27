@@ -116,8 +116,14 @@ jobs:
       - name: Coverage summary
         run: |
           go tool cover -func=coverage.out | tail -n 1
+      - name: Prepare artifact name
+        env:
+          TF_VERSION: ${{ matrix.terraform }}
+        run: |
+          set -euo pipefail
+          echo "TF_VERSION_SAFE=${TF_VERSION//\*/x}" >> "$GITHUB_ENV"
       - name: Upload coverage profile
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.terraform }}-${{ matrix.api_version }}
+          name: coverage-${{ env.TF_VERSION_SAFE }}-${{ matrix.api_version }}
           path: coverage.out
