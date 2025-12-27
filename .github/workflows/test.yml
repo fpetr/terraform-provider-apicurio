@@ -110,5 +110,6 @@ jobs:
           TF_ACC: "1"
           APICURIO_ENDPOINT: "http://localhost:8080"
           APICURIO_API_VERSION: ${{ matrix.api_version }}
+          APICURIO_TEST_RULES: 1
         run: go test -v -cover ./internal/provider/
         timeout-minutes: 10
