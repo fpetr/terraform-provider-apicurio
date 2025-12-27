@@ -162,7 +162,7 @@ This repo includes a Docker Compose setup that runs Apicurio Registry backed by 
 
 ```bash
 cp .env.apicurio.example .env
-# Edit OIDC_AUTH_SERVER_URL to your realm issuer URL (typically https://login.fpetr.com/realms/<realm>)
+# Edit OIDC_AUTH_SERVER_URL to your realm issuer URL (typically https://login.example.com/realms/<realm>)
 docker compose --env-file .env -f compose.yml up -d
 ```
 
