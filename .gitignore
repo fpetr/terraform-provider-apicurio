@@ -1,6 +1,10 @@
 *.dll
 *.exe
 .DS_Store
+
+# Local docker compose env
+.env
+.env.apicurio
 example.tf
 terraform.tfplan
 terraform.tfstate

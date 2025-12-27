@@ -12,8 +12,6 @@ Terraform provider for Apicurio Registry (v2/v3).
 ## Example Usage
 
 ```terraform
-# Copyright (c) HashiCorp, Inc.
-
 provider "apicurio" {
   endpoint = "http://localhost:3080"
 }

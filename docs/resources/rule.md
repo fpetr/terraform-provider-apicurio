@@ -13,8 +13,6 @@ Manages Apicurio Registry rules (global or per-artifact).
 ## Example Usage
 
 ```terraform
-# Copyright (c) HashiCorp, Inc.
-
 provider "apicurio" {
   endpoint = "http://localhost:3080"
 }
@@ -56,13 +54,9 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Copyright (c) HashiCorp, Inc.
-
-# Import a GLOBAL rule.
-# Format: global/<rule_type>
+# Import a GLOBAL rule. Format: global/<rule_type>
 terraform import apicurio_rule.example "global/COMPATIBILITY"
 
-# Import an ARTIFACT rule.
-# Format: <group_id>/<artifact_id>/<rule_type>
+# Import an ARTIFACT rule. Format: <group_id>/<artifact_id>/<rule_type>
 terraform import apicurio_rule.example "com.example.common.v1/ErrorCommonMessage/COMPATIBILITY"
 ```

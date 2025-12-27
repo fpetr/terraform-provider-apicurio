@@ -1,5 +1,3 @@
-# Copyright (c) HashiCorp, Inc.
-
 provider "apicurio" {
   endpoint = "http://localhost:3080"
 }
@@ -18,8 +16,8 @@ resource "apicurio_artifact" "example" {
   description = "Shared error envelope"
 
   labels = [
-    "com.example.control.pravidla.otk.v1.public.error",
-    "com.example.control.pravidla.ai.v1.public.error",
+    "com.example.common.v1.error",
+    "com.example.common.v1.public.error",
   ]
 
   hard_delete = false

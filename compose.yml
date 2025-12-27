@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-apicurio}
+      POSTGRES_USER: ${POSTGRES_USER:-apicurio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apicurio}
+    volumes:
+      - apicurio_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  registry:
+    image: apicurio/apicurio-registry:${APICURIO_REGISTRY_TAG:-3.1.3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Storage (PostgreSQL)
+      APICURIO_STORAGE_KIND: "sql"
+      APICURIO_STORAGE_SQL_KIND: "postgresql"
+      APICURIO_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-apicurio}"
+      APICURIO_DATASOURCE_USERNAME: ${POSTGRES_USER:-apicurio}
+      APICURIO_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-apicurio}
+
+      # Optional: keep parity with CI/dev expectations
+      APICURIO_REST_MUTABILITY_ARTIFACT_VERSION_CONTENT_ENABLED: ${APICURIO_REST_MUTABILITY_ARTIFACT_VERSION_CONTENT_ENABLED:-"true"}
+      APICURIO_REST_DELETION_ARTIFACT_ENABLED: ${APICURIO_REST_DELETION_ARTIFACT_ENABLED:-"true"}
+      APICURIO_REST_DELETION_ARTIFACT_VERSION_ENABLED: ${APICURIO_REST_DELETION_ARTIFACT_VERSION_ENABLED:-"true"}
+      APICURIO_REST_DELETION_GROUP_ENABLED: ${APICURIO_REST_DELETION_GROUP_ENABLED:-"true"}
+
+      # OIDC (Keycloak) for REST API
+      # Expected format (Keycloak): https://login.fpetr.com/realms/<realm>
+      QUARKUS_OIDC_TENANT_ENABLED: "true"
+      QUARKUS_OIDC_AUTH_SERVER_URL: ${OIDC_AUTH_SERVER_URL:?set OIDC_AUTH_SERVER_URL}
+      QUARKUS_OIDC_CLIENT_ID: ${OIDC_API_CLIENT_ID:?set OIDC_API_CLIENT_ID}
+      APICURIO_UI_AUTH_OIDC_CLIENT_ID: ${OIDC_UI_CLIENT_ID:?set OIDC_UI_CLIENT_ID}
+      QUARKUS_OIDC_TLS_VERIFICATION: "none"
+      QUARKUS_HTTP_CORS_ORIGINS: "*"
+      QUARKUS_PROFILE: "prod"
+      
+  ui:
+    image: apicurio/apicurio-registry-ui:${APICURIO_UI_TAG:-3.1.3}
+    depends_on:
+      - registry
+    ports:
+      - "8888:8080"
+    environment:
+      # IMPORTANT: this URL is used by the browser, so it must be reachable from your workstation.
+      REGISTRY_API_URL: ${REGISTRY_API_URL:-http://localhost:8080/apis/registry/v3}
+
+      # OIDC for the UI
+      REGISTRY_AUTH_TYPE: "oidc"
+      # For Keycloak, this is typically the realm URL (issuer), e.g. https://login.fpetr.com/realms/<realm>
+      REGISTRY_AUTH_URL: ${OIDC_AUTH_SERVER_URL:?set OIDC_AUTH_SERVER_URL}
+      # REGISTRY_AUTH_CLIENT_ID: ${OIDC_UI_CLIENT_ID:?set OIDC_UI_CLIENT_ID}
+      REGISTRY_AUTH_REDIRECT_URL: ${OIDC_REDIRECT_URL:-http://localhost:8888}
+
+volumes:
+  apicurio_pgdata:

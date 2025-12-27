@@ -151,6 +151,27 @@ If a v3 endpoint returns 404, the provider falls back to the corresponding v2 en
 
 ## Build and run locally
 
+### Local Apicurio (PostgreSQL + OIDC)
+
+This repo includes a Docker Compose setup that runs Apicurio Registry backed by PostgreSQL and protected by OIDC (Keycloak).
+
+- Compose file: `compose.yml`
+- Env template: `.env.apicurio.example`
+- UI: `http://localhost:8888`
+- API: `http://localhost:8080` (v3 base is `/apis/registry/v3`)
+
+```bash
+cp .env.apicurio.example .env
+# Edit OIDC_AUTH_SERVER_URL to your realm issuer URL (typically https://login.fpetr.com/realms/<realm>)
+docker compose --env-file .env -f compose.yml up -d
+```
+
+Notes:
+
+- `OIDC_AUTH_SERVER_URL` should be the realm issuer URL (Keycloak typically requires the `/realms/<realm>` suffix).
+- Configure Keycloak clients and set `OIDC_API_CLIENT_ID` and `OIDC_UI_CLIENT_ID`.
+- `OIDC_REDIRECT_URL` must match the UI client redirect URI (defaults to `http://localhost:8888`).
+
 Build the provider binary:
 
 ```bash

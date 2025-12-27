@@ -13,8 +13,6 @@ Manages an Apicurio Registry artifact (group/artifactId/custom version/labels). 
 ## Example Usage
 
 ```terraform
-# Copyright (c) HashiCorp, Inc.
-
 provider "apicurio" {
   endpoint = "http://localhost:3080"
 }
@@ -33,8 +31,8 @@ resource "apicurio_artifact" "example" {
   description = "Shared error envelope"
 
   labels = [
-    "com.example.control.pravidla.otk.v1.public.error",
-    "com.example.control.pravidla.ai.v1.public.error",
+    "com.example.common.v1.error",
+    "com.example.common.v1.public.error",
   ]
 
   hard_delete = false
@@ -78,9 +76,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Copyright (c) HashiCorp, Inc.
-
-# Import an existing artifact by group and artifact id.
-# Format: <group_id>/<artifact_id>
+# Import an existing artifact by group and artifact id. Format: <group_id>/<artifact_id>
 terraform import apicurio_artifact.example "com.example.common.v1/ErrorCommonMessage"
 ```
