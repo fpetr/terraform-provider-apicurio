@@ -202,6 +202,14 @@ func (c *v3Client) DeleteArtifact(ctx context.Context, groupID, artifactID strin
 	return c.delegate.DeleteArtifact(ctx, groupID, artifactID, hardDelete)
 }
 
+func (c *v3Client) GroupHasAnyArtifacts(ctx context.Context, groupID string) (bool, *ResponseError) {
+	return c.delegate.GroupHasAnyArtifacts(ctx, groupID)
+}
+
+func (c *v3Client) DeleteGroup(ctx context.Context, groupID string) *ResponseError {
+	return c.delegate.DeleteGroup(ctx, groupID)
+}
+
 func (c *v3Client) GetGlobalRule(ctx context.Context, ruleType string) (string, *ResponseError) {
 	return c.delegate.GetGlobalRule(ctx, ruleType)
 }

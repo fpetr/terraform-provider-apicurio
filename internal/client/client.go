@@ -71,6 +71,11 @@ type RegistryClient interface {
 
 	DeleteArtifact(ctx context.Context, groupID, artifactID string, hardDelete bool) *ResponseError
 
+	// Group operations (best-effort cleanup helpers).
+	// Note: Apicurio groups are not automatically deleted when the last artifact is deleted.
+	GroupHasAnyArtifacts(ctx context.Context, groupID string) (bool, *ResponseError)
+	DeleteGroup(ctx context.Context, groupID string) *ResponseError
+
 	GetGlobalRule(ctx context.Context, ruleType string) (string, *ResponseError)
 	PutGlobalRule(ctx context.Context, ruleType, config string) *ResponseError
 	DeleteGlobalRule(ctx context.Context, ruleType string) *ResponseError

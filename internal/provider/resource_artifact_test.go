@@ -169,9 +169,12 @@ func sha256hexString(s string) string {
 }
 
 func testAccApicurioArtifactConfig(endpoint, groupID, artifactID, content string, allowOverwrite bool) string {
-	// Auth is optional; set APICURIO_AUTH_HEADER or APICURIO_TOKEN as needed.
+	// Auth is optional; set APICURIO_AUTH_HEADER, APICURIO_TOKEN, or APICURIO_OIDC_* as needed.
 	authHeader := os.Getenv("APICURIO_AUTH_HEADER")
 	token := os.Getenv("APICURIO_TOKEN")
+	oidcTokenURL := os.Getenv("APICURIO_OIDC_TOKEN_URL")
+	oidcClientID := os.Getenv("APICURIO_OIDC_CLIENT_ID")
+	oidcClientSecret := os.Getenv("APICURIO_OIDC_CLIENT_SECRET")
 	apiVersion := os.Getenv("APICURIO_API_VERSION")
 
 	authBlock := ""
@@ -179,6 +182,8 @@ func testAccApicurioArtifactConfig(endpoint, groupID, artifactID, content string
 		authBlock = fmt.Sprintf("auth_header = %q", authHeader)
 	} else if token != "" {
 		authBlock = fmt.Sprintf("token = %q", token)
+	} else if oidcTokenURL != "" && oidcClientID != "" && oidcClientSecret != "" {
+		authBlock = fmt.Sprintf("oidc = { token_url = %q client_id = %q client_secret = %q }", oidcTokenURL, oidcClientID, oidcClientSecret)
 	}
 
 	apiVersionBlock := ""
@@ -215,6 +220,9 @@ resource "apicurio_artifact" "test" {
 func testAccApicurioArtifactContentFileConfig(endpoint, groupID, artifactID, contentFilePath, name, description string, labels []string) string {
 	authHeader := os.Getenv("APICURIO_AUTH_HEADER")
 	token := os.Getenv("APICURIO_TOKEN")
+	oidcTokenURL := os.Getenv("APICURIO_OIDC_TOKEN_URL")
+	oidcClientID := os.Getenv("APICURIO_OIDC_CLIENT_ID")
+	oidcClientSecret := os.Getenv("APICURIO_OIDC_CLIENT_SECRET")
 	apiVersion := os.Getenv("APICURIO_API_VERSION")
 
 	authBlock := ""
@@ -222,6 +230,8 @@ func testAccApicurioArtifactContentFileConfig(endpoint, groupID, artifactID, con
 		authBlock = fmt.Sprintf("auth_header = %q", authHeader)
 	} else if token != "" {
 		authBlock = fmt.Sprintf("token = %q", token)
+	} else if oidcTokenURL != "" && oidcClientID != "" && oidcClientSecret != "" {
+		authBlock = fmt.Sprintf("oidc = { token_url = %q client_id = %q client_secret = %q }", oidcTokenURL, oidcClientID, oidcClientSecret)
 	}
 
 	apiVersionBlock := ""

@@ -48,6 +48,9 @@ func TestAccApicurioDataSourceArtifact_basic(t *testing.T) {
 func testAccApicurioDataSourceArtifactConfig(endpoint, groupID, artifactID, content string) string {
 	authHeader := os.Getenv("APICURIO_AUTH_HEADER")
 	token := os.Getenv("APICURIO_TOKEN")
+	oidcTokenURL := os.Getenv("APICURIO_OIDC_TOKEN_URL")
+	oidcClientID := os.Getenv("APICURIO_OIDC_CLIENT_ID")
+	oidcClientSecret := os.Getenv("APICURIO_OIDC_CLIENT_SECRET")
 	apiVersion := os.Getenv("APICURIO_API_VERSION")
 
 	authBlock := ""
@@ -55,6 +58,8 @@ func testAccApicurioDataSourceArtifactConfig(endpoint, groupID, artifactID, cont
 		authBlock = fmt.Sprintf("auth_header = %q", authHeader)
 	} else if token != "" {
 		authBlock = fmt.Sprintf("token = %q", token)
+	} else if oidcTokenURL != "" && oidcClientID != "" && oidcClientSecret != "" {
+		authBlock = fmt.Sprintf("oidc = { token_url = %q client_id = %q client_secret = %q }", oidcTokenURL, oidcClientID, oidcClientSecret)
 	}
 
 	apiVersionBlock := ""

@@ -245,6 +245,75 @@ func (c *v2Client) DeleteArtifact(ctx context.Context, groupID, artifactID strin
 	return nil
 }
 
+func (c *v2Client) GroupHasAnyArtifacts(ctx context.Context, groupID string) (bool, *ResponseError) {
+	if strings.TrimSpace(groupID) == "" {
+		return false, nil
+	}
+
+	u, err := url.Parse(c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts")
+	if err != nil {
+		return false, &ResponseError{Err: err}
+	}
+	q := u.Query()
+	q.Set("limit", "1")
+	u.RawQuery = q.Encode()
+
+	resp, rerr := c.doRaw(ctx, http.MethodGet, u.String(), nil, nil)
+	if rerr != nil {
+		return false, rerr
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}
+	}
+
+	var decoded any
+	if err := json.Unmarshal([]byte(resp.Body), &decoded); err != nil {
+		return false, &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: err}
+	}
+
+	switch v := decoded.(type) {
+	case []any:
+		// Older Apicurio versions return a bare array.
+		return len(v) > 0, nil
+	case map[string]any:
+		// Newer Apicurio versions return an object: {"artifacts": [...], "count": N}
+		if artifacts, ok := v["artifacts"].([]any); ok {
+			return len(artifacts) > 0, nil
+		}
+		if count, ok := v["count"].(float64); ok {
+			return count > 0, nil
+		}
+		return false, nil
+	default:
+		return false, nil
+	}
+}
+
+func (c *v2Client) DeleteGroup(ctx context.Context, groupID string) *ResponseError {
+	if strings.TrimSpace(groupID) == "" {
+		return nil
+	}
+	u := c.base() + "/groups/" + url.PathEscape(groupID)
+	resp, err := c.doRaw(ctx, http.MethodDelete, u, nil, nil)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	// Group deletion can fail if not empty; treat that as a non-fatal no-op.
+	if resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}
+	}
+	return nil
+}
+
 func (c *v2Client) GetGlobalRule(ctx context.Context, ruleType string) (string, *ResponseError) {
 	u := c.base() + "/admin/rules/" + url.PathEscape(ruleType)
 	resp, err := c.doRaw(ctx, http.MethodGet, u, nil, nil)

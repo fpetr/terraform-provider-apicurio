@@ -435,6 +435,39 @@ func (r *artifactResource) Delete(ctx context.Context, req resource.DeleteReques
 		resp.Diagnostics.AddError("Delete failed", formatClientError("unable to delete artifact", derr))
 		return
 	}
+
+	// Apicurio does not automatically delete groups when the last artifact is deleted.
+	// When hard_delete=true, do a best-effort cleanup to delete the group if it is empty.
+	if hardDelete {
+		groupID := strings.TrimSpace(state.GroupID.ValueString())
+		if groupID != "" {
+			deleted, gerr := deleteGroupIfEmpty(ctx, r.client, groupID)
+			if gerr != nil {
+				resp.Diagnostics.AddWarning("Group cleanup failed", formatClientError("unable to clean up empty group (best-effort)", gerr))
+			} else if deleted {
+				// No-op: keep destroy behavior successful.
+			}
+		}
+	}
+}
+
+type groupCleanupClient interface {
+	GroupHasAnyArtifacts(ctx context.Context, groupID string) (bool, *client.ResponseError)
+	DeleteGroup(ctx context.Context, groupID string) *client.ResponseError
+}
+
+func deleteGroupIfEmpty(ctx context.Context, c groupCleanupClient, groupID string) (bool, *client.ResponseError) {
+	hasAny, err := c.GroupHasAnyArtifacts(ctx, groupID)
+	if err != nil {
+		return false, err
+	}
+	if hasAny {
+		return false, nil
+	}
+	if err := c.DeleteGroup(ctx, groupID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *artifactResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

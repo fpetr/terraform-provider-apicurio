@@ -1,4 +1,4 @@
-# Terraform Provider Apicurio (Terraform Plugin Framework)
+# Terraform Provider Apicurio
 
 Terraform provider for managing Apicurio Registry artifacts (group/artifactId/custom version string/labels) with automatic v3/v2 detection.
 
