@@ -73,16 +73,34 @@ func (c *v2Client) CreateArtifact(ctx context.Context, groupID, artifactID, arti
 
 func (c *v2Client) UpdateArtifactMeta(ctx context.Context, groupID, artifactID string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError) {
 	u := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID) + "/meta"
+	resp, rerr := c.updateArtifactMetaAt(ctx, u, meta)
+	if rerr != nil {
+		return nil, rerr
+	}
+	// The Apicurio UI uses v3 endpoints; when the provider is configured for v2 it updates
+	// /v2/.../meta, but the UI won't show artifact-level labels unless they are also written
+	// to the v3 artifact metadata endpoint.
+	c.mirrorArtifactMetaToV3(ctx, groupID, artifactID, meta)
+	return resp, nil
+}
 
-	payload := map[string]any{}
+func (c *v2Client) UpdateArtifactVersionMeta(ctx context.Context, groupID, artifactID, version string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError) {
+	u := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID) + "/versions/" + url.PathEscape(version) + "/meta"
+	return c.updateArtifactMetaAt(ctx, u, meta)
+}
+
+func (c *v2Client) updateArtifactMetaAt(ctx context.Context, u string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError) {
+	basePayload := map[string]any{}
 	if meta.Name != nil {
-		payload["name"] = *meta.Name
+		basePayload["name"] = *meta.Name
 	}
 	if meta.Description != nil {
-		payload["description"] = *meta.Description
+		basePayload["description"] = *meta.Description
 	}
+
+	var labels []string
 	if meta.Labels != nil {
-		labels := make([]string, 0, len(meta.Labels))
+		labels = make([]string, 0, len(meta.Labels))
 		seen := map[string]struct{}{}
 		for _, l := range meta.Labels {
 			l = strings.TrimSpace(l)
@@ -95,6 +113,18 @@ func (c *v2Client) UpdateArtifactMeta(ctx context.Context, groupID, artifactID s
 			seen[l] = struct{}{}
 			labels = append(labels, l)
 		}
+	}
+
+	headers := map[string]string{"Content-Type": "application/json"}
+
+	// v2 /meta endpoints expect labels as an array of strings. Sending object-shaped labels
+	// causes 400 (Jackson expects ArrayList<String>).
+	payload := basePayload
+	if meta.Labels != nil {
+		payload = map[string]any{}
+		for k, v := range basePayload {
+			payload[k] = v
+		}
 		payload["labels"] = labels
 	}
 
@@ -102,8 +132,54 @@ func (c *v2Client) UpdateArtifactMeta(ctx context.Context, groupID, artifactID s
 	if err != nil {
 		return nil, &ResponseError{Err: err}
 	}
-	headers := map[string]string{"Content-Type": "application/json"}
 	return c.doJSON(ctx, http.MethodPut, u, headers, bytes.NewReader(b))
+}
+
+func (c *v2Client) mirrorArtifactMetaToV3(ctx context.Context, groupID, artifactID string, meta ArtifactMetaUpdate) {
+	u := c.endpoint + "/apis/registry/v3/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID)
+
+	payload := map[string]any{}
+	if meta.Name != nil {
+		payload["name"] = *meta.Name
+	}
+	if meta.Description != nil {
+		payload["description"] = *meta.Description
+	}
+	if meta.Labels != nil {
+		objStr := map[string]string{}
+		seen := map[string]struct{}{}
+		for _, l := range meta.Labels {
+			l = strings.TrimSpace(l)
+			if l == "" {
+				continue
+			}
+			if _, ok := seen[l]; ok {
+				continue
+			}
+			seen[l] = struct{}{}
+			objStr[l] = "true"
+		}
+		payload["labels"] = objStr
+	}
+
+	if len(payload) == 0 {
+		return
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	headers := map[string]string{"Content-Type": "application/json"}
+	resp, rerr := c.doRaw(ctx, http.MethodPut, u, headers, bytes.NewReader(b))
+	if rerr != nil {
+		return
+	}
+	// Best-effort only: v2 servers may not expose v3 endpoints.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return
+	}
 }
 
 func (c *v2Client) VersionExists(ctx context.Context, groupID, artifactID, version string) (bool, *ResponseError) {
@@ -324,23 +400,7 @@ type rawResp struct {
 }
 
 func (c *v2Client) doRaw(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*rawResp, *ResponseError) {
-	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
-	if err != nil {
-		return nil, &ResponseError{Err: err}
-	}
-	applyAuth(req, c.cfg)
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, &ResponseError{Err: err}
-	}
-	defer resp.Body.Close()
-
-	b, _ := ReadBodyLimited(resp.Body)
-	return &rawResp{StatusCode: resp.StatusCode, Body: b, Header: resp.Header}, nil
+	return doRawWithDeadlockRetry(ctx, c.httpClient, c.cfg, method, urlStr, headers, body)
 }
 
 func (c *v2Client) doJSON(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*ArtifactMetaResponse, *ResponseError) {
@@ -348,23 +408,7 @@ func (c *v2Client) doJSON(ctx context.Context, method, urlStr string, headers ma
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}
-	}
-
-	// Some endpoints return empty body.
-	trim := strings.TrimSpace(resp.Body)
-	if trim == "" {
-		return &ArtifactMetaResponse{Raw: map[string]any{}, Normalized: NormalizedArtifactMeta{}}, nil
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(trim), &raw); err != nil {
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: trim, Err: fmt.Errorf("failed to decode JSON: %w", err)}
-	}
-
-	n := normalizeMeta(raw)
-	return &ArtifactMetaResponse{Raw: raw, Normalized: n}, nil
+	return decodeMetaJSON(resp.StatusCode, resp.Body)
 }
 
 func normalizeMeta(raw map[string]any) NormalizedArtifactMeta {

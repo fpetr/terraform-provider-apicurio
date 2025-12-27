@@ -63,6 +63,7 @@ type RegistryClient interface {
 
 	CreateArtifact(ctx context.Context, groupID, artifactID, artifactType string, version *string, content []byte) (*ArtifactMetaResponse, *ResponseError)
 	UpdateArtifactMeta(ctx context.Context, groupID, artifactID string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError)
+	UpdateArtifactVersionMeta(ctx context.Context, groupID, artifactID, version string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError)
 
 	VersionExists(ctx context.Context, groupID, artifactID, version string) (bool, *ResponseError)
 	DeleteArtifactVersion(ctx context.Context, groupID, artifactID, version string) *ResponseError

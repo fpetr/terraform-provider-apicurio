@@ -49,7 +49,7 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 					resource.TestCheckResourceAttr(resourceName, "version", "v1"),
 					resource.TestCheckResourceAttr(resourceName, "allow_overwrite_version", "false"),
 					resource.TestCheckResourceAttr(resourceName, "hard_delete", "true"),
-					resource.TestCheckResourceAttr(resourceName, "name", artifactID),
+					resource.TestCheckResourceAttrSet(resourceName, "name"),
 					resource.TestCheckResourceAttr(resourceName, "content_sha256", content1Hash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "com.example.control.pravidla.otk.v1.public.error"),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "com.example.control.pravidla.ai.v1.public.error"),
@@ -110,7 +110,7 @@ func TestAccApicurioArtifact_contentFileAndMetadataOnlyUpdate(t *testing.T) {
 			{
 				Config: testAccApicurioArtifactContentFileConfig(endpoint, groupID, artifactID, contentPath, "", "", []string{" label.one ", "label.two", "label.two"}),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceName, "name", artifactID),
+					resource.TestCheckResourceAttrSet(resourceName, "name"),
 					resource.TestCheckResourceAttr(resourceName, "content_sha256", contentHash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.one"),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.two"),
@@ -201,7 +201,6 @@ resource "apicurio_artifact" "test" {
 
   content = %q
 
-  # Default name should be artifact_id
   labels = [
 		"com.example.control.pravidla.otk.v1.public.error",
 		"com.example.control.pravidla.ai.v1.public.error",

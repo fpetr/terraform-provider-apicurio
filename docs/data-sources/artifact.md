@@ -3,12 +3,12 @@
 page_title: "apicurio_artifact Data Source - apicurio"
 subcategory: ""
 description: |-
-  Reads an Apicurio Registry artifact using Core Registry API v2 semantics.
+  Reads an Apicurio Registry artifact. Uses v3 endpoints when available, otherwise falls back to v2.
 ---
 
 # apicurio_artifact (Data Source)
 
-Reads an Apicurio Registry artifact using Core Registry API v2 semantics.
+Reads an Apicurio Registry artifact. Uses v3 endpoints when available, otherwise falls back to v2.
 
 
 

@@ -4,35 +4,55 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
-// v3Client currently reuses v2 endpoint shapes as a best-effort fallback.
-// Apicurio Registry v3 servers often still expose v2 Core API endpoints.
-// If a server truly only exposes v3 endpoints, you can extend this client with
-// the correct v3 paths without changing provider/resource code.
+// v3Client supports Apicurio Registry v3 endpoint shapes where they differ from v2.
+// In particular, newer Apicurio v3 APIs manage artifact metadata at:
+//   /apis/registry/v3/groups/{groupId}/artifacts/{artifactId}
+// and version metadata at:
+//   /apis/registry/v3/groups/{groupId}/artifacts/{artifactId}/versions/{versionExpression}
 //
-// For now, we implement v3 as:
-// - Prefer /apis/registry/v3/* system probe
-// - Use /apis/registry/v2/* semantics for CRUD (because the desired UX is v2 semantics)
-// - If v2 endpoints are missing, operations will return clear HTTP errors.
-//
-// This keeps the abstraction layer in place while avoiding speculative v3 mapping.
+// Many deployments still expose v2 endpoints as well; to stay compatible (and keep
+// acceptance tests working against v2-only servers), we fall back to the v2 delegate
+// when v3 endpoints return 404.
 
 type v3Client struct {
-	delegate RegistryClient
+	endpoint   string
+	httpClient *http.Client
+	cfg        ClientConfig
+	delegate   RegistryClient
 }
 
 func NewV3(endpoint string, httpClient *http.Client, cfg ClientConfig) RegistryClient {
-	// Delegate to v2 semantics.
-	return &v3Client{delegate: NewV2(endpoint, httpClient, cfg)}
+	return &v3Client{
+		endpoint:   endpoint,
+		httpClient: httpClient,
+		cfg:        cfg,
+		delegate:   NewV2(endpoint, httpClient, cfg),
+	}
 }
 
 func (c *v3Client) Flavor() ServerFlavor { return ServerFlavorV3 }
 
+func (c *v3Client) base() string { return c.endpoint + "/apis/registry/v3" }
+
 func (c *v3Client) GetArtifactMeta(ctx context.Context, groupID, artifactID string) (*ArtifactMetaResponse, *ResponseError) {
-	return c.delegate.GetArtifactMeta(ctx, groupID, artifactID)
+	u := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID)
+	resp, err := c.doJSON(ctx, http.MethodGet, u, map[string]string{"Accept": "application/json"}, nil)
+	if err != nil {
+		if err.IsNotFound() {
+			return c.delegate.GetArtifactMeta(ctx, groupID, artifactID)
+		}
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (c *v3Client) GetLatestArtifactContent(ctx context.Context, groupID, artifactID string) ([]byte, *ResponseError) {
@@ -44,7 +64,126 @@ func (c *v3Client) CreateArtifact(ctx context.Context, groupID, artifactID, arti
 }
 
 func (c *v3Client) UpdateArtifactMeta(ctx context.Context, groupID, artifactID string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError) {
-	return c.delegate.UpdateArtifactMeta(ctx, groupID, artifactID, meta)
+	u := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID)
+	resp, err := c.updateArtifactMetaAt(ctx, u, meta)
+	if err != nil {
+		if err.IsNotFound() {
+			return c.delegate.UpdateArtifactMeta(ctx, groupID, artifactID, meta)
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *v3Client) UpdateArtifactVersionMeta(ctx context.Context, groupID, artifactID, version string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError) {
+	// v3 manages version metadata at the version endpoint (no trailing /meta).
+	u := c.base() + "/groups/" + url.PathEscape(groupID) + "/artifacts/" + url.PathEscape(artifactID) + "/versions/" + url.PathEscape(version)
+	resp, err := c.updateArtifactMetaAt(ctx, u, meta)
+	if err != nil {
+		if err.IsNotFound() {
+			return c.delegate.UpdateArtifactVersionMeta(ctx, groupID, artifactID, version, meta)
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *v3Client) updateArtifactMetaAt(ctx context.Context, u string, meta ArtifactMetaUpdate) (*ArtifactMetaResponse, *ResponseError) {
+	basePayload := map[string]any{}
+	if meta.Name != nil {
+		basePayload["name"] = *meta.Name
+	}
+	if meta.Description != nil {
+		basePayload["description"] = *meta.Description
+	}
+
+	var labels []string
+	if meta.Labels != nil {
+		labels = make([]string, 0, len(meta.Labels))
+		seen := map[string]struct{}{}
+		for _, l := range meta.Labels {
+			l = strings.TrimSpace(l)
+			if l == "" {
+				continue
+			}
+			if _, ok := seen[l]; ok {
+				continue
+			}
+			seen[l] = struct{}{}
+			labels = append(labels, l)
+		}
+	}
+
+	headers := map[string]string{"Content-Type": "application/json", "Accept": "application/json"}
+
+	// Prefer v3-style name/value label map.
+	if meta.Labels != nil {
+		payloadWithStringMapLabels := map[string]any{}
+		for k, v := range basePayload {
+			payloadWithStringMapLabels[k] = v
+		}
+		objStr := map[string]string{}
+		for _, l := range labels {
+			objStr[l] = "true"
+		}
+		payloadWithStringMapLabels["labels"] = objStr
+
+		b, err := json.Marshal(payloadWithStringMapLabels)
+		if err != nil {
+			return nil, &ResponseError{Err: err}
+		}
+		if resp, rerr := c.doJSON(ctx, http.MethodPut, u, headers, bytes.NewReader(b)); rerr == nil {
+			return resp, nil
+		} else if rerr.StatusCode != http.StatusBadRequest {
+			return nil, rerr
+		}
+
+		payloadWithNullMapLabels := map[string]any{}
+		for k, v := range basePayload {
+			payloadWithNullMapLabels[k] = v
+		}
+		objNull := map[string]any{}
+		for _, l := range labels {
+			objNull[l] = nil
+		}
+		payloadWithNullMapLabels["labels"] = objNull
+
+		b, err = json.Marshal(payloadWithNullMapLabels)
+		if err != nil {
+			return nil, &ResponseError{Err: err}
+		}
+		if resp, rerr := c.doJSON(ctx, http.MethodPut, u, headers, bytes.NewReader(b)); rerr == nil {
+			return resp, nil
+		} else if rerr.StatusCode != http.StatusBadRequest {
+			return nil, rerr
+		}
+	}
+
+	payload := basePayload
+	if meta.Labels != nil {
+		payload = map[string]any{}
+		for k, v := range basePayload {
+			payload[k] = v
+		}
+		payload["labels"] = labels
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, &ResponseError{Err: err}
+	}
+	return c.doJSON(ctx, http.MethodPut, u, headers, bytes.NewReader(b))
+}
+func (c *v3Client) doRaw(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*rawResp, *ResponseError) {
+	return doRawWithDeadlockRetry(ctx, c.httpClient, c.cfg, method, urlStr, headers, body)
+}
+
+func (c *v3Client) doJSON(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*ArtifactMetaResponse, *ResponseError) {
+	resp, err := c.doRaw(ctx, method, urlStr, headers, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMetaJSON(resp.StatusCode, resp.Body)
 }
 
 func (c *v3Client) VersionExists(ctx context.Context, groupID, artifactID, version string) (bool, *ResponseError) {
