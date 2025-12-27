@@ -63,11 +63,20 @@ jobs:
       matrix:
         # list whatever Terraform versions here you would like to support
         terraform:
-          - '1.0.*'
-          - '1.1.*'
-          - '1.2.*'
-          - '1.3.*'
-          - '1.4.*'
+          - '1.10.*'
+          - '1.11.*'
+          - '1.12.*'
+          - '1.13.*'
+          - '1.14.*'
+        api_version:
+          - v2
+          - v3
+
+    services:
+      apicurio:
+        image: quay.io/apicurio/apicurio-registry-mem:2.6.13.Final
+        ports:
+          - 8080:8080
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
@@ -79,7 +88,21 @@ jobs:
           terraform_version: ${{ matrix.terraform }}
           terraform_wrapper: false
       - run: go mod download
+      - name: Wait for Apicurio
+        run: |
+          set -euo pipefail
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/apis/registry/v2/system/info >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/apis/registry/v2/system/info >/dev/null
+          # CI requires v3 endpoints to be available as well.
+          curl -fsS http://localhost:8080/apis/registry/v3/system/info >/dev/null
       - env:
           TF_ACC: "1"
+          APICURIO_ENDPOINT: "http://localhost:8080"
+          APICURIO_API_VERSION: ${{ matrix.api_version }}
         run: go test -v -cover ./internal/provider/
         timeout-minutes: 10

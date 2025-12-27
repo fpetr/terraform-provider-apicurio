@@ -28,8 +28,7 @@ resource "apicurio_artifact" "example" {
 
   content_file = "schemas/com.example.common.v1/ErrorCommonMessage.json"
 
-  # Optional display name. Note: the registry may auto-populate this from the artifact
-  # content (e.g., Avro record name) if you don't set it.
+  # Keep UI clean: defaults to artifact_id, but explicit is fine too
   name        = "ErrorCommonMessage"
   description = "Shared error envelope"
 
