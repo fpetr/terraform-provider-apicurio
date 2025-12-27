@@ -441,11 +441,9 @@ func (r *artifactResource) Delete(ctx context.Context, req resource.DeleteReques
 	if hardDelete {
 		groupID := strings.TrimSpace(state.GroupID.ValueString())
 		if groupID != "" {
-			deleted, gerr := deleteGroupIfEmpty(ctx, r.client, groupID)
+			_, gerr := deleteGroupIfEmpty(ctx, r.client, groupID)
 			if gerr != nil {
 				resp.Diagnostics.AddWarning("Group cleanup failed", formatClientError("unable to clean up empty group (best-effort)", gerr))
-			} else if deleted {
-				// No-op: keep destroy behavior successful.
 			}
 		}
 	}

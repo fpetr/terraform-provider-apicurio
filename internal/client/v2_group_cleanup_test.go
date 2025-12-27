@@ -29,7 +29,7 @@ func TestV2Client_GroupHasAnyArtifacts_limit1_and_parse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+	c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 	ok, err := c.GroupHasAnyArtifacts(context.Background(), "g1")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -50,7 +50,7 @@ func TestV2Client_GroupHasAnyArtifacts_parseObjectShape(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+		c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 		ok, err := c.GroupHasAnyArtifacts(context.Background(), "g1")
 		if err != nil {
 			t.Fatalf("expected nil error, got %v", err)
@@ -67,7 +67,7 @@ func TestV2Client_GroupHasAnyArtifacts_parseObjectShape(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+		c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 		ok, err := c.GroupHasAnyArtifacts(context.Background(), "g1")
 		if err != nil {
 			t.Fatalf("expected nil error, got %v", err)
@@ -84,7 +84,7 @@ func TestV2Client_GroupHasAnyArtifacts_parseObjectShape(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+		c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 		ok, err := c.GroupHasAnyArtifacts(context.Background(), "g1")
 		if err != nil {
 			t.Fatalf("expected nil error, got %v", err)
@@ -101,7 +101,7 @@ func TestV2Client_GroupHasAnyArtifacts_parseObjectShape(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+		c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 		ok, err := c.GroupHasAnyArtifacts(context.Background(), "g1")
 		if err != nil {
 			t.Fatalf("expected nil error, got %v", err)
@@ -118,7 +118,7 @@ func TestV2Client_GroupHasAnyArtifacts_404_is_empty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+	c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 	ok, err := c.GroupHasAnyArtifacts(context.Background(), "g1")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -131,7 +131,6 @@ func TestV2Client_GroupHasAnyArtifacts_404_is_empty(t *testing.T) {
 func TestV2Client_DeleteGroup_404_and_409_are_noop(t *testing.T) {
 	codes := []int{http.StatusNotFound, http.StatusConflict}
 	for _, code := range codes {
-		code := code
 		t.Run(http.StatusText(code), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodDelete {
@@ -142,7 +141,7 @@ func TestV2Client_DeleteGroup_404_and_409_are_noop(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c := NewV2(srv.URL, srv.Client(), ClientConfig{Endpoint: srv.URL}).(*v2Client)
+			c := &v2Client{endpoint: srv.URL, httpClient: srv.Client(), cfg: ClientConfig{Endpoint: srv.URL}}
 			if err := c.DeleteGroup(context.Background(), "g1"); err != nil {
 				t.Fatalf("expected nil error, got %v", err)
 			}
