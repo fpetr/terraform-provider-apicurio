@@ -75,6 +75,12 @@ jobs:
     services:
       apicurio:
         image: apicurio/apicurio-registry:3.1.3
+        env:
+          APICURIO_REST_MUTABILITY_ARTIFACT_VERSION_CONTENT_ENABLED: "true"
+          APICURIO_REST_DELETION_ARTIFACT_ENABLED: "true"
+          APICURIO_REST_DELETION_ARTIFACT_VERSION_ENABLED: "true"
+          APICURIO_REST_DELETION_GROUP_ENABLED: "true"
+          APICURIO_RULES_GLOBAL_COMPATIBILITY: "BACKWARD"
         ports:
           - 8080:8080
     steps:
