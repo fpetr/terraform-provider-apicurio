@@ -8,6 +8,7 @@ bin/
 dist/
 modules-dev/
 /pkg/
+terraform-provider-*
 website/.vagrant
 website/.bundle
 website/build

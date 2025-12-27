@@ -66,7 +66,7 @@ func (p *ApicurioProvider) Schema(ctx context.Context, req provider.SchemaReques
 				Required:            true,
 			},
 			"api_version": schema.StringAttribute{
-				MarkdownDescription: "Apicurio API version flavor to use. One of: `v2`, `v3`. Defaults to `v3`.",
+				MarkdownDescription: "Apicurio API flavor to use. One of: `v2`, `v3`. If unset, the provider probes for v3 and falls back to v2 (best-effort).",
 				Optional:            true,
 				Validators: []validator.String{
 					stringvalidator.OneOf("v2", "v3"),

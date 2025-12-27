@@ -3,12 +3,12 @@
 page_title: "apicurio_artifact Resource - apicurio"
 subcategory: ""
 description: |-
-  Manages an Apicurio Registry artifact using Core Registry API v2 semantics (group/artifactId/custom version/labels).
+  Manages an Apicurio Registry artifact (group/artifactId/custom version/labels). Uses v3 endpoints when available, otherwise falls back to v2.
 ---
 
 # apicurio_artifact (Resource)
 
-Manages an Apicurio Registry artifact using Core Registry API v2 semantics (group/artifactId/custom version/labels).
+Manages an Apicurio Registry artifact (group/artifactId/custom version/labels). Uses v3 endpoints when available, otherwise falls back to v2.
 
 ## Example Usage
 
@@ -28,7 +28,8 @@ resource "apicurio_artifact" "example" {
 
   content_file = "schemas/com.example.common.v1/ErrorCommonMessage.json"
 
-  # Keep UI clean: defaults to artifact_id, but explicit is fine too
+  # Optional display name. Note: the registry may auto-populate this from the artifact
+  # content (e.g., Avro record name) if you don't set it.
   name        = "ErrorCommonMessage"
   description = "Shared error envelope"
 
@@ -58,7 +59,7 @@ resource "apicurio_artifact" "example" {
 - `description` (String) Artifact description.
 - `hard_delete` (Boolean) If true, hard-delete the artifact. Default is soft delete.
 - `labels` (Set of String) Labels to apply to the artifact. Apicurio UI shows them as keys with null values.
-- `name` (String) Artifact display name. Defaults to `artifact_id` to avoid UI suffixes.
+- `name` (String) Artifact display name.
 - `version` (String) Custom version string (e.g. `v1`). If set, the provider creates/updates that specific version.
 
 ### Read-Only

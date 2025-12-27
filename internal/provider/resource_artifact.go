@@ -35,7 +35,6 @@ var (
 	_ resource.Resource                = &artifactResource{}
 	_ resource.ResourceWithConfigure   = &artifactResource{}
 	_ resource.ResourceWithImportState = &artifactResource{}
-	_ resource.ResourceWithModifyPlan  = &artifactResource{}
 )
 
 func NewArtifactResource() resource.Resource {
@@ -74,7 +73,7 @@ func (r *artifactResource) Metadata(ctx context.Context, req resource.MetadataRe
 
 func (r *artifactResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an Apicurio Registry artifact using Core Registry API v2 semantics (group/artifactId/custom version/labels).",
+		MarkdownDescription: "Manages an Apicurio Registry artifact (group/artifactId/custom version/labels). Uses v3 endpoints when available, otherwise falls back to v2.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Internal Terraform ID in the form `<group_id>/<artifact_id>`.",
@@ -125,7 +124,7 @@ func (r *artifactResource) Schema(ctx context.Context, req resource.SchemaReques
 				ElementType:         types.StringType,
 			},
 			"name": schema.StringAttribute{
-				MarkdownDescription: "Artifact display name. Defaults to `artifact_id` to avoid UI suffixes.",
+				MarkdownDescription: "Artifact display name.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -201,29 +200,10 @@ func (r *artifactResource) Configure(ctx context.Context, req resource.Configure
 	r.client = c
 }
 
-func (r *artifactResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || !req.Plan.Raw.IsKnown() {
-		return
-	}
-
-	var plan artifactResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Default name to artifact_id if not set.
-	if plan.Name.IsNull() || plan.Name.IsUnknown() {
-		if !plan.ArtifactID.IsNull() && !plan.ArtifactID.IsUnknown() {
-			plan.Name = plan.ArtifactID
-		}
-	}
-
-	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
-}
-
 func (r *artifactResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var config artifactResourceModel
 	var plan artifactResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -268,19 +248,22 @@ func (r *artifactResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Apply metadata (name defaults to artifact_id).
-	name := plan.Name.ValueString()
-	if strings.TrimSpace(name) == "" {
-		name = plan.ArtifactID.ValueString()
+	// Apply metadata.
+	var namePtr *string
+	if !config.Name.IsNull() && !config.Name.IsUnknown() {
+		n := strings.TrimSpace(config.Name.ValueString())
+		if n != "" {
+			namePtr = &n
+		}
 	}
 	var descPtr *string
-	if !plan.Description.IsNull() && !plan.Description.IsUnknown() {
-		d := plan.Description.ValueString()
+	if !config.Description.IsNull() && !config.Description.IsUnknown() {
+		d := config.Description.ValueString()
 		descPtr = &d
 	}
-	labels := setToStrings(ctx, plan.Labels)
+	labels := setToStrings(ctx, config.Labels)
 	metaUpdate := client.ArtifactMetaUpdate{
-		Name:        &name,
+		Name:        namePtr,
 		Description: descPtr,
 		Labels:      labels,
 	}
@@ -340,9 +323,11 @@ func (r *artifactResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *artifactResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var config artifactResourceModel
 	var plan artifactResourceModel
 	var state artifactResourceModel
 
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -366,7 +351,7 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 
-	metadataChanged := metadataDiffers(ctx, plan, state)
+	metadataChanged := metadataDiffers(ctx, config, plan, state)
 
 	if contentChanged {
 		if requestedVersion != nil {
@@ -398,18 +383,21 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	if metadataChanged {
-		name := plan.Name.ValueString()
-		if strings.TrimSpace(name) == "" {
-			name = plan.ArtifactID.ValueString()
+		var namePtr *string
+		if !config.Name.IsNull() && !config.Name.IsUnknown() {
+			n := strings.TrimSpace(config.Name.ValueString())
+			if n != "" {
+				namePtr = &n
+			}
 		}
 		var descPtr *string
-		if !plan.Description.IsNull() && !plan.Description.IsUnknown() {
-			d := plan.Description.ValueString()
+		if !config.Description.IsNull() && !config.Description.IsUnknown() {
+			d := config.Description.ValueString()
 			descPtr = &d
 		}
-		labels := setToStrings(ctx, plan.Labels)
+		labels := setToStrings(ctx, config.Labels)
 		metaUpdate := client.ArtifactMetaUpdate{
-			Name:        &name,
+			Name:        namePtr,
 			Description: descPtr,
 			Labels:      labels,
 		}
@@ -534,6 +522,9 @@ func applyMetaToState(state artifactResourceModel, n client.NormalizedArtifactMe
 	if state.LatestVersion.IsUnknown() {
 		state.LatestVersion = types.StringNull()
 	}
+	if state.Name.IsUnknown() {
+		state.Name = types.StringNull()
+	}
 	return state
 }
 
@@ -595,17 +586,15 @@ func stringsToSet(in []string) types.Set {
 	return set
 }
 
-func metadataDiffers(ctx context.Context, plan, state artifactResourceModel) bool {
-	pName := strings.TrimSpace(plan.Name.ValueString())
-	if pName == "" {
-		pName = plan.ArtifactID.ValueString()
-	}
-	sName := strings.TrimSpace(state.Name.ValueString())
-	if sName == "" {
-		sName = state.ArtifactID.ValueString()
-	}
-	if pName != sName {
-		return true
+func metadataDiffers(ctx context.Context, config, plan, state artifactResourceModel) bool {
+	// Only compare name when explicitly configured. Otherwise the server-populated value in
+	// state must not trigger updates.
+	if !config.Name.IsNull() && !config.Name.IsUnknown() {
+		pName := strings.TrimSpace(plan.Name.ValueString())
+		sName := strings.TrimSpace(state.Name.ValueString())
+		if pName != sName {
+			return true
+		}
 	}
 	if strings.TrimSpace(plan.Description.ValueString()) != strings.TrimSpace(state.Description.ValueString()) {
 		return true

@@ -1,11 +1,11 @@
 # Terraform Provider Apicurio (Terraform Plugin Framework)
 
-Terraform provider for managing Apicurio Registry artifacts using **Core Registry API v2 semantics** (group/artifactId/custom version string/labels).
+Terraform provider for managing Apicurio Registry artifacts (group/artifactId/custom version string/labels) with automatic v3/v2 detection.
 
 This is designed for organizations that:
 - organize artifacts by `group_id` and `artifact_id`
 - use version strings like `v1`, `v2` (not numeric Schema Registry versions)
-- want Apicurio UI to show `<group> / <artifactId>` with `name` defaulting to `artifact_id`
+- optional `name` for display name
 
 ## Requirements
 
@@ -18,11 +18,11 @@ This is designed for organizations that:
 - Main entrypoint: `cmd/terraform-provider-apicurio/main.go`
 - Registry abstraction: `internal/client/client.go` (`RegistryClient` interface)
 - v2 implementation: `internal/client/v2.go` (Core API v2)
-- v3 fallback: `internal/client/v3.go` (currently delegates to v2 semantics; keeps the abstraction layer in place)
+- v3 implementation: `internal/client/v3.go` (uses v3 metadata endpoints when available; falls back to v2 where needed)
 
 The provider can be pinned to an Apicurio API flavor via `api_version` (`v2` or `v3`).
 
-If `api_version` is not set, the provider defaults to `v3` and will best-effort probe:
+If `api_version` is not set, the provider will best-effort probe (preferring `v3`):
 - tries `GET {endpoint}/apis/registry/v3/system/info`
 - else tries `GET {endpoint}/apis/registry/v2/system/info`
 - defaults to `v3` if probing fails (best-effort)
@@ -74,7 +74,7 @@ resource "apicurio_artifact" "example" {
 
 	version = "v1"
 
-	# Defaults to artifact_id (keeps UI clean)
+	# Optional display name
 	# name        = "ErrorCommonMessage"
 	description = "Shared error envelope"
 
@@ -115,9 +115,9 @@ terraform import apicurio_rule.artifact_compatibility "<group_id>/<artifact_id>/
 terraform import apicurio_rule.some_global_rule "global/<rule_type>"
 ```
 
-## API call mapping (Core API v2)
+## API call mapping
 
-The provider uses these endpoints when available under `/apis/registry/v2`:
+The provider prefers v3 endpoints when available and falls back to v2.
 
 - Create artifact:
 	- `POST /apis/registry/v2/groups/{group}/artifacts`
@@ -126,14 +126,12 @@ The provider uses these endpoints when available under `/apis/registry/v2`:
 		- `X-Registry-ArtifactType: {artifact_type}`
 		- `X-Registry-Version: {version}` (if set)
 	- body: raw content
-- Update metadata:
-	- `PUT /apis/registry/v2/groups/{group}/artifacts/{artifact}/meta`
-	- body includes `name`, `description`, and `labels`
-	- labels are sent as a string map (keys -> "true") with fallbacks to (keys -> null) and a string array (server-dependent)
-	- if `version` is set in the Terraform resource, the provider also updates that version metadata:
-		- `PUT /apis/registry/v2/groups/{group}/artifacts/{artifact}/versions/{version}/meta`
-- Read metadata:
-	- `GET /apis/registry/v2/groups/{group}/artifacts/{artifact}/meta`
+- Update/read metadata (preferred v3):
+	- `PUT /apis/registry/v3/groups/{group}/artifacts/{artifact}`
+	- `GET /apis/registry/v3/groups/{group}/artifacts/{artifact}`
+	- version metadata (when `version` is set):
+		- `PUT /apis/registry/v3/groups/{group}/artifacts/{artifact}/versions/{version}`
+	- if v3 endpoints return 404, the provider falls back to v2 `/meta` endpoints.
 - Read latest content (best-effort for drift hash):
 	- `GET /apis/registry/v2/groups/{group}/artifacts/{artifact}`
 - Create new version:
@@ -146,11 +144,10 @@ The provider uses these endpoints when available under `/apis/registry/v2`:
 - Delete artifact:
 	- `DELETE /apis/registry/v2/groups/{group}/artifacts/{artifact}?hardDelete=true` (if `hard_delete`)
 
-## v3 fallback strategy
+## v3/v2 strategy
 
-On servers that report a v3 system endpoint, the provider currently still performs CRUD using Core API v2 semantics (many Apicurio v3 deployments expose v2 Core API endpoints).
-
-If you encounter a v3-only server where v2 endpoints are truly absent, extend `internal/client/v3.go` to map the `RegistryClient` interface to the correct v3 paths without changing provider/resource code.
+If `api_version` is unset, the provider probes `/apis/registry/v3/system/info` first and prefers v3.
+If a v3 endpoint returns 404, the provider falls back to the corresponding v2 endpoint (best-effort).
 
 ## Build and run locally
 

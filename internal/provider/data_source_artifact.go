@@ -49,7 +49,7 @@ func (d *artifactDataSource) Metadata(ctx context.Context, req datasource.Metada
 
 func (d *artifactDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Reads an Apicurio Registry artifact using Core Registry API v2 semantics.",
+		MarkdownDescription: "Reads an Apicurio Registry artifact. Uses v3 endpoints when available, otherwise falls back to v2.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Internal Terraform ID in the form `<group_id>/<artifact_id>`.",

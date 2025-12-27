@@ -400,23 +400,7 @@ type rawResp struct {
 }
 
 func (c *v2Client) doRaw(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*rawResp, *ResponseError) {
-	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
-	if err != nil {
-		return nil, &ResponseError{Err: err}
-	}
-	applyAuth(req, c.cfg)
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, &ResponseError{Err: err}
-	}
-	defer resp.Body.Close()
-
-	b, _ := ReadBodyLimited(resp.Body)
-	return &rawResp{StatusCode: resp.StatusCode, Body: b, Header: resp.Header}, nil
+	return doRawWithDeadlockRetry(ctx, c.httpClient, c.cfg, method, urlStr, headers, body)
 }
 
 func (c *v2Client) doJSON(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*ArtifactMetaResponse, *ResponseError) {
@@ -424,23 +408,7 @@ func (c *v2Client) doJSON(ctx context.Context, method, urlStr string, headers ma
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}
-	}
-
-	// Some endpoints return empty body.
-	trim := strings.TrimSpace(resp.Body)
-	if trim == "" {
-		return &ArtifactMetaResponse{Raw: map[string]any{}, Normalized: NormalizedArtifactMeta{}}, nil
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(trim), &raw); err != nil {
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: trim, Err: fmt.Errorf("failed to decode JSON: %w", err)}
-	}
-
-	n := normalizeMeta(raw)
-	return &ArtifactMetaResponse{Raw: raw, Normalized: n}, nil
+	return decodeMetaJSON(resp.StatusCode, resp.Body)
 }
 
 func normalizeMeta(raw map[string]any) NormalizedArtifactMeta {

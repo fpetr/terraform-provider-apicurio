@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -176,23 +175,7 @@ func (c *v3Client) updateArtifactMetaAt(ctx context.Context, u string, meta Arti
 	return c.doJSON(ctx, http.MethodPut, u, headers, bytes.NewReader(b))
 }
 func (c *v3Client) doRaw(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*rawResp, *ResponseError) {
-	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
-	if err != nil {
-		return nil, &ResponseError{Err: err}
-	}
-	applyAuth(req, c.cfg)
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, &ResponseError{Err: err}
-	}
-	defer resp.Body.Close()
-
-	b, _ := ReadBodyLimited(resp.Body)
-	return &rawResp{StatusCode: resp.StatusCode, Body: b, Header: resp.Header}, nil
+	return doRawWithDeadlockRetry(ctx, c.httpClient, c.cfg, method, urlStr, headers, body)
 }
 
 func (c *v3Client) doJSON(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) (*ArtifactMetaResponse, *ResponseError) {
@@ -200,22 +183,7 @@ func (c *v3Client) doJSON(ctx context.Context, method, urlStr string, headers ma
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: resp.Body, Err: fmt.Errorf("unexpected response")}
-	}
-
-	trim := strings.TrimSpace(resp.Body)
-	if trim == "" {
-		return &ArtifactMetaResponse{Raw: map[string]any{}, Normalized: NormalizedArtifactMeta{}}, nil
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(trim), &raw); err != nil {
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: trim, Err: fmt.Errorf("failed to decode JSON: %w", err)}
-	}
-
-	n := normalizeMeta(raw)
-	return &ArtifactMetaResponse{Raw: raw, Normalized: n}, nil
+	return decodeMetaJSON(resp.StatusCode, resp.Body)
 }
 
 func (c *v3Client) VersionExists(ctx context.Context, groupID, artifactID, version string) (bool, *ResponseError) {

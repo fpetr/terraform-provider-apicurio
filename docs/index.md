@@ -28,7 +28,7 @@ provider "apicurio" {
 
 ### Optional
 
-- `api_version` (String) Apicurio API version flavor to use. One of: `v2`, `v3`. Defaults to `v3`.
+- `api_version` (String) Apicurio API flavor to use. One of: `v2`, `v3`. If unset, the provider probes for v3 and falls back to v2 (best-effort).
 - `auth_header` (String, Sensitive) Optional literal header in the form `Header-Name: value`, e.g. `Authorization: Bearer <token>`. Overrides `token` if set.
 - `basic_auth` (Attributes) Optional HTTP Basic authentication. (see [below for nested schema](#nestedatt--basic_auth))
 - `ca_bundle_path` (String) Optional path to a PEM CA bundle to trust when connecting to HTTPS endpoints.
