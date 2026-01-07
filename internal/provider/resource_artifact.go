@@ -35,6 +35,7 @@ var (
 	_ resource.Resource                = &artifactResource{}
 	_ resource.ResourceWithConfigure   = &artifactResource{}
 	_ resource.ResourceWithImportState = &artifactResource{}
+	_ resource.ResourceWithModifyPlan  = &artifactResource{}
 )
 
 func NewArtifactResource() resource.Resource {
@@ -66,6 +67,7 @@ type artifactResourceModel struct {
 	LatestVersion          types.String `tfsdk:"latest_version"`
 	ContentSHA256          types.String `tfsdk:"content_sha256"`
 	ContentCanonicalSHA256 types.String `tfsdk:"content_canonical_sha256"`
+	ContentLocalSHA256     types.String `tfsdk:"content_local_sha256"`
 }
 
 func (r *artifactResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -175,8 +177,41 @@ func (r *artifactResource) Schema(ctx context.Context, req resource.SchemaReques
 				MarkdownDescription: "SHA256 of the latest content in the registry after JSON canonicalization (best-effort). For JSON-based artifact types (e.g. AVRO, JSON), this removes formatting-only differences (whitespace/indentation/object key ordering).",
 				Computed:            true,
 			},
+			"content_local_sha256": schema.StringAttribute{
+				MarkdownDescription: "SHA256 of the configured local content (derived from `content` or by reading `content_file`) after JSON canonicalization for JSON-based types (e.g. AVRO, JSON). This is computed at plan time so changes to file contents trigger diffs even when the path is unchanged.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 	}
+}
+
+func (r *artifactResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Terraform 1.3+ destroy planning: Plan can be null.
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var plan artifactResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Compute a stable, plan-time local hash from the configured content so that
+	// changes to file bytes participate in the diff even when content_file is unchanged.
+	localHash, diags := localContentHashFromPlan(plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if localHash != "" {
+		plan.ContentLocalSHA256 = types.StringValue(localHash)
+	}
+
+	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 }
 
 func (r *artifactResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
@@ -589,6 +624,14 @@ func resolveContentFromPlan(plan artifactResourceModel) ([]byte, diag.Diagnostic
 
 	diags.AddError("Invalid configuration", "Exactly one of content or content_file must be set")
 	return nil, diags
+}
+
+func localContentHashFromPlan(plan artifactResourceModel) (string, diag.Diagnostics) {
+	content, diags := resolveContentFromPlan(plan)
+	if diags.HasError() {
+		return "", diags
+	}
+	return contentComparisonHash(plan.ArtifactType.ValueString(), content), diags
 }
 
 func sha256hex(b []byte) string {

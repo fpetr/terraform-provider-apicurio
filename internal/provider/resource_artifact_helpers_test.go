@@ -37,6 +37,39 @@ func TestSha256hexFromPlan_InvalidConfigReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestLocalContentHashFromPlan_ContentFile_CanonicalizesJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := tmpDir + "/schema.avsc"
+
+	content1 := []byte("{\n  \"b\": 1,\n  \"a\": 2\n}\n")
+	content2 := []byte("{\"a\":2,\"b\":1}")
+
+	if err := os.WriteFile(path, content1, 0o600); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+
+	plan := artifactResourceModel{
+		ArtifactType: types.StringValue("AVRO"),
+		ContentFile:  types.StringValue(path),
+	}
+	h1, diags := localContentHashFromPlan(plan)
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got: %v", diags)
+	}
+
+	if err := os.WriteFile(path, content2, 0o600); err != nil {
+		t.Fatalf("failed to rewrite temp file: %v", err)
+	}
+	h2, diags := localContentHashFromPlan(plan)
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got: %v", diags)
+	}
+
+	if h1 != h2 {
+		t.Fatalf("expected identical canonical hashes for formatting-only JSON diffs, got %q vs %q", h1, h2)
+	}
+}
+
 func TestApplyMetaToState_UnknownsBecomeNull(t *testing.T) {
 	state := artifactResourceModel{
 		GroupID:       types.StringValue("g"),

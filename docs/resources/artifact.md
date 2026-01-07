@@ -63,6 +63,7 @@ resource "apicurio_artifact" "example" {
 
 - `content_canonical_sha256` (String) SHA256 of the latest content in the registry after JSON canonicalization (best-effort). For JSON-based artifact types (e.g. AVRO, JSON), this removes formatting-only differences (whitespace/indentation/object key ordering).
 - `content_id` (Number) Apicurio content ID (if exposed by the server).
+- `content_local_sha256` (String) SHA256 of the configured local content (derived from `content` or by reading `content_file`) after JSON canonicalization for JSON-based types (e.g. AVRO, JSON). This is computed at plan time so changes to file contents trigger diffs even when the path is unchanged.
 - `content_sha256` (String) SHA256 of the latest content in the registry (best-effort).
 - `created_on` (String) Creation time (RFC3339) if exposed by the server.
 - `global_id` (Number) Apicurio global ID (if exposed by the server).

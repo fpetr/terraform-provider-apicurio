@@ -48,6 +48,7 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 					resource.TestCheckResourceAttr(resourceName, "allow_overwrite_version", "false"),
 					resource.TestCheckResourceAttr(resourceName, "hard_delete", "true"),
 					resource.TestCheckResourceAttrSet(resourceName, "name"),
+					resource.TestCheckResourceAttr(resourceName, "content_local_sha256", content1Hash),
 					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", content1Hash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "com.example.control.pravidla.otk.v1.public.error"),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "com.example.control.pravidla.ai.v1.public.error"),
@@ -71,6 +72,7 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 				Config: testAccApicurioArtifactConfig(endpoint, groupID, artifactID, content2, true),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "allow_overwrite_version", "true"),
+					resource.TestCheckResourceAttr(resourceName, "content_local_sha256", content2Hash),
 					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", content2Hash),
 				),
 			},
@@ -109,6 +111,7 @@ func TestAccApicurioArtifact_contentFileAndMetadataOnlyUpdate(t *testing.T) {
 				Config: testAccApicurioArtifactContentFileConfig(endpoint, groupID, artifactID, contentPath, "", "", []string{" label.one ", "label.two", "label.two"}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(resourceName, "name"),
+					resource.TestCheckResourceAttr(resourceName, "content_local_sha256", contentHash),
 					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", contentHash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.one"),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.two"),
@@ -120,6 +123,7 @@ func TestAccApicurioArtifact_contentFileAndMetadataOnlyUpdate(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "name", "Custom Name"),
 					resource.TestCheckResourceAttr(resourceName, "description", "Custom Description"),
+					resource.TestCheckResourceAttr(resourceName, "content_local_sha256", contentHash),
 					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", contentHash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.two"),
 				),
