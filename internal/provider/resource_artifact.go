@@ -59,12 +59,13 @@ type artifactResourceModel struct {
 	Description           types.String `tfsdk:"description"`
 	HardDelete            types.Bool   `tfsdk:"hard_delete"`
 
-	GlobalID      types.Int64  `tfsdk:"global_id"`
-	ContentID     types.Int64  `tfsdk:"content_id"`
-	CreatedOn     types.String `tfsdk:"created_on"`
-	ModifiedOn    types.String `tfsdk:"modified_on"`
-	LatestVersion types.String `tfsdk:"latest_version"`
-	ContentSHA256 types.String `tfsdk:"content_sha256"`
+	GlobalID               types.Int64  `tfsdk:"global_id"`
+	ContentID              types.Int64  `tfsdk:"content_id"`
+	CreatedOn              types.String `tfsdk:"created_on"`
+	ModifiedOn             types.String `tfsdk:"modified_on"`
+	LatestVersion          types.String `tfsdk:"latest_version"`
+	ContentSHA256          types.String `tfsdk:"content_sha256"`
+	ContentCanonicalSHA256 types.String `tfsdk:"content_canonical_sha256"`
 }
 
 func (r *artifactResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -168,6 +169,10 @@ func (r *artifactResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"content_sha256": schema.StringAttribute{
 				MarkdownDescription: "SHA256 of the latest content in the registry (best-effort).",
+				Computed:            true,
+			},
+			"content_canonical_sha256": schema.StringAttribute{
+				MarkdownDescription: "SHA256 of the latest content in the registry after JSON canonicalization (best-effort). For JSON-based artifact types (e.g. AVRO, JSON), this removes formatting-only differences (whitespace/indentation/object key ordering).",
 				Computed:            true,
 			},
 		},
@@ -285,7 +290,6 @@ func (r *artifactResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	state.ContentSHA256 = types.StringValue(sha256hex(content))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -309,14 +313,13 @@ func (r *artifactResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// Preserve config-side fields; refresh computed/metadata.
 	state = applyMetaToState(state, meta.Normalized)
 
-	// Best-effort content hash.
+	// Best-effort content hashes from the server.
 	content, cerr := r.client.GetLatestArtifactContent(ctx, state.GroupID.ValueString(), state.ArtifactID.ValueString())
 	if cerr != nil {
 		resp.Diagnostics.AddWarning("Content read failed", formatClientError("unable to read artifact content to compute content_sha256", cerr))
 	} else {
-		if state.ContentSHA256.IsNull() || state.ContentSHA256.IsUnknown() || strings.TrimSpace(state.ContentSHA256.ValueString()) == "" {
-			state.ContentSHA256 = types.StringValue(sha256hex(content))
-		}
+		state.ContentSHA256 = types.StringValue(sha256hex(content))
+		state.ContentCanonicalSHA256 = types.StringValue(contentComparisonHash(state.ArtifactType.ValueString(), content))
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -339,9 +342,15 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	newHash := sha256hex(content)
-	oldHash := state.ContentSHA256.ValueString()
-	contentChanged := oldHash == "" || newHash != oldHash
+	newCompareHash := contentComparisonHash(plan.ArtifactType.ValueString(), content)
+	oldCompareHash := ""
+	if !state.ContentCanonicalSHA256.IsNull() && !state.ContentCanonicalSHA256.IsUnknown() {
+		oldCompareHash = strings.TrimSpace(state.ContentCanonicalSHA256.ValueString())
+	}
+	if oldCompareHash == "" && !state.ContentSHA256.IsNull() && !state.ContentSHA256.IsUnknown() {
+		oldCompareHash = strings.TrimSpace(state.ContentSHA256.ValueString())
+	}
+	contentChanged := oldCompareHash == "" || newCompareHash != oldCompareHash
 
 	var requestedVersion *string
 	if !plan.Version.IsNull() && !plan.Version.IsUnknown() {
@@ -419,7 +428,6 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	newState.ContentSHA256 = types.StringValue(newHash)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
 }
 
@@ -496,12 +504,16 @@ func (r *artifactResource) readIntoState(ctx context.Context, groupID, artifactI
 	state := plan
 	state.ID = types.StringValue(groupID + "/" + artifactID)
 	state = applyMetaToState(state, meta.Normalized)
-	state.ContentSHA256 = types.StringValue(sha256hexFromPlan(plan))
-	if state.ContentSHA256.ValueString() == "" {
-		// Fallback to server content hash.
-		content, cerr := r.client.GetLatestArtifactContent(ctx, groupID, artifactID)
-		if cerr == nil {
-			state.ContentSHA256 = types.StringValue(sha256hex(content))
+
+	// Prefer server content hashes to accurately represent the latest registry content.
+	if content, cerr := r.client.GetLatestArtifactContent(ctx, groupID, artifactID); cerr == nil {
+		state.ContentSHA256 = types.StringValue(sha256hex(content))
+		state.ContentCanonicalSHA256 = types.StringValue(contentComparisonHash(state.ArtifactType.ValueString(), content))
+	} else {
+		// Best-effort fallback to plan content hashes when server content cannot be read.
+		if b, bdiags := resolveContentFromPlan(plan); !bdiags.HasError() {
+			state.ContentSHA256 = types.StringValue(sha256hex(b))
+			state.ContentCanonicalSHA256 = types.StringValue(contentComparisonHash(state.ArtifactType.ValueString(), b))
 		}
 	}
 

@@ -63,6 +63,7 @@ resource "apicurio_artifact" "example" {
 
 - `content_id` (Number) Apicurio content ID (if exposed by the server).
 - `content_sha256` (String) SHA256 of the latest content in the registry (best-effort).
+- `content_canonical_sha256` (String) SHA256 of the latest content in the registry after JSON canonicalization (best-effort). For JSON-based types (e.g. AVRO, JSON), formatting-only differences (whitespace/indentation/object key ordering) are ignored.
 - `created_on` (String) Creation time (RFC3339) if exposed by the server.
 - `global_id` (Number) Apicurio global ID (if exposed by the server).
 - `id` (String) Internal Terraform ID in the form `<group_id>/<artifact_id>`.

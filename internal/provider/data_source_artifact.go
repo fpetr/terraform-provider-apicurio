@@ -35,12 +35,13 @@ type artifactDataSourceModel struct {
 	Description types.String `tfsdk:"description"`
 	Labels      types.Set    `tfsdk:"labels"`
 
-	GlobalID      types.Int64  `tfsdk:"global_id"`
-	ContentID     types.Int64  `tfsdk:"content_id"`
-	CreatedOn     types.String `tfsdk:"created_on"`
-	ModifiedOn    types.String `tfsdk:"modified_on"`
-	LatestVersion types.String `tfsdk:"latest_version"`
-	ContentSHA256 types.String `tfsdk:"content_sha256"`
+	GlobalID               types.Int64  `tfsdk:"global_id"`
+	ContentID              types.Int64  `tfsdk:"content_id"`
+	CreatedOn              types.String `tfsdk:"created_on"`
+	ModifiedOn             types.String `tfsdk:"modified_on"`
+	LatestVersion          types.String `tfsdk:"latest_version"`
+	ContentSHA256          types.String `tfsdk:"content_sha256"`
+	ContentCanonicalSHA256 types.String `tfsdk:"content_canonical_sha256"`
 }
 
 func (d *artifactDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -98,6 +99,10 @@ func (d *artifactDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			},
 			"content_sha256": schema.StringAttribute{
 				MarkdownDescription: "SHA256 of the latest content in the registry (best-effort).",
+				Computed:            true,
+			},
+			"content_canonical_sha256": schema.StringAttribute{
+				MarkdownDescription: "SHA256 of the latest content in the registry after JSON canonicalization (best-effort). For JSON-based artifact types (e.g. AVRO, JSON), this removes formatting-only differences (whitespace/indentation/object key ordering).",
 				Computed:            true,
 			},
 		},
@@ -175,6 +180,11 @@ func (d *artifactDataSource) Read(ctx context.Context, req datasource.ReadReques
 
 	if content, cerr := d.client.GetLatestArtifactContent(ctx, groupID, artifactID); cerr == nil {
 		data.ContentSHA256 = types.StringValue(sha256hex(content))
+		if canon, err := canonicalizeJSON(content); err == nil {
+			data.ContentCanonicalSHA256 = types.StringValue(sha256hex(canon))
+		} else {
+			data.ContentCanonicalSHA256 = types.StringValue(sha256hex(content))
+		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

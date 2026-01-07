@@ -24,6 +24,7 @@ Reads an Apicurio Registry artifact. Uses v3 endpoints when available, otherwise
 
 - `content_id` (Number) Apicurio content ID (if exposed by the server).
 - `content_sha256` (String) SHA256 of the latest content in the registry (best-effort).
+- `content_canonical_sha256` (String) SHA256 of the latest content in the registry after JSON canonicalization (best-effort). If the registry content is valid JSON, formatting-only differences (whitespace/indentation/object key ordering) are ignored.
 - `created_on` (String) Creation time (RFC3339) if exposed by the server.
 - `description` (String) Artifact description.
 - `global_id` (Number) Apicurio global ID (if exposed by the server).

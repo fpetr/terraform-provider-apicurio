@@ -4,8 +4,6 @@
 package provider
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,8 +29,8 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 	artifactID := fmt.Sprintf("tf-acc-%d", time.Now().UnixNano())
 	content1 := `{"type":"record","name":"ErrorCommonMessage","namespace":"com.example.common.v1","fields":[{"name":"message","type":"string"}]}`
 	content2 := `{"type":"record","name":"ErrorCommonMessage","namespace":"com.example.common.v1","fields":[{"name":"message","type":"string"},{"name":"code","type":"string","default":""}]}`
-	content1Hash := sha256hexString(content1)
-	content2Hash := sha256hexString(content2)
+	content1Hash := sha256hexCanonicalString(t, content1)
+	content2Hash := sha256hexCanonicalString(t, content2)
 
 	resourceName := "apicurio_artifact.test"
 
@@ -50,7 +48,7 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 					resource.TestCheckResourceAttr(resourceName, "allow_overwrite_version", "false"),
 					resource.TestCheckResourceAttr(resourceName, "hard_delete", "true"),
 					resource.TestCheckResourceAttrSet(resourceName, "name"),
-					resource.TestCheckResourceAttr(resourceName, "content_sha256", content1Hash),
+					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", content1Hash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "com.example.control.pravidla.otk.v1.public.error"),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "com.example.control.pravidla.ai.v1.public.error"),
 				),
@@ -73,7 +71,7 @@ func TestAccApicurioArtifact_basic(t *testing.T) {
 				Config: testAccApicurioArtifactConfig(endpoint, groupID, artifactID, content2, true),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "allow_overwrite_version", "true"),
-					resource.TestCheckResourceAttr(resourceName, "content_sha256", content2Hash),
+					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", content2Hash),
 				),
 			},
 		},
@@ -93,7 +91,7 @@ func TestAccApicurioArtifact_contentFileAndMetadataOnlyUpdate(t *testing.T) {
 
 	artifactID := fmt.Sprintf("tf-acc-file-%d", time.Now().UnixNano())
 	content := `{"type":"record","name":"AccContentFile","namespace":"com.example.common.v1","fields":[{"name":"message","type":"string"}]}`
-	contentHash := sha256hexString(content)
+	contentHash := sha256hexCanonicalString(t, content)
 
 	tmpDir := t.TempDir()
 	contentPath := filepath.Join(tmpDir, "schema.avsc")
@@ -111,7 +109,7 @@ func TestAccApicurioArtifact_contentFileAndMetadataOnlyUpdate(t *testing.T) {
 				Config: testAccApicurioArtifactContentFileConfig(endpoint, groupID, artifactID, contentPath, "", "", []string{" label.one ", "label.two", "label.two"}),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(resourceName, "name"),
-					resource.TestCheckResourceAttr(resourceName, "content_sha256", contentHash),
+					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", contentHash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.one"),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.two"),
 				),
@@ -122,12 +120,21 @@ func TestAccApicurioArtifact_contentFileAndMetadataOnlyUpdate(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "name", "Custom Name"),
 					resource.TestCheckResourceAttr(resourceName, "description", "Custom Description"),
-					resource.TestCheckResourceAttr(resourceName, "content_sha256", contentHash),
+					resource.TestCheckResourceAttr(resourceName, "content_canonical_sha256", contentHash),
 					resource.TestCheckTypeSetElemAttr(resourceName, "labels.*", "label.two"),
 				),
 			},
 		},
 	})
+}
+
+func sha256hexCanonicalString(t *testing.T, s string) string {
+	t.Helper()
+	canon, err := canonicalizeJSON([]byte(s))
+	if err != nil {
+		t.Fatalf("expected valid JSON content, got error: %v", err)
+	}
+	return sha256hex(canon)
 }
 
 func TestAccApicurioArtifact_overwriteVersionGuard(t *testing.T) {
@@ -162,12 +169,6 @@ func TestAccApicurioArtifact_overwriteVersionGuard(t *testing.T) {
 		},
 	})
 }
-
-func sha256hexString(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
-}
-
 func testAccApicurioArtifactConfig(endpoint, groupID, artifactID, content string, allowOverwrite bool) string {
 	// Auth is optional; set APICURIO_AUTH_HEADER, APICURIO_TOKEN, or APICURIO_OIDC_* as needed.
 	authHeader := os.Getenv("APICURIO_AUTH_HEADER")
