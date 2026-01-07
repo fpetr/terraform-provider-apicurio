@@ -387,42 +387,61 @@ func (r *artifactResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	contentChanged := oldCompareHash == "" || newCompareHash != oldCompareHash
 
-	var requestedVersion *string
-	if !plan.Version.IsNull() && !plan.Version.IsUnknown() {
-		v := strings.TrimSpace(plan.Version.ValueString())
-		if v != "" {
-			requestedVersion = &v
-		}
-	}
+	requestedVersion := requestedVersionFromModel(plan)
+	requestedVersionChanged := requestedVersionChanged(state, requestedVersion)
 
 	metadataChanged := metadataDiffers(ctx, config, plan, state)
 
-	if contentChanged {
+	// Create a new version when content changes OR when the requested version changes.
+	// Without this, updating only `version` can be a no-op and Terraform state can end up
+	// claiming a version that does not exist remotely.
+	if shouldAttemptVersionWrite(contentChanged, requestedVersion, requestedVersionChanged) {
 		if requestedVersion != nil {
 			exists, eerr := r.client.VersionExists(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *requestedVersion)
 			if eerr != nil {
 				resp.Diagnostics.AddError("Version check failed", formatClientError("unable to check version existence", eerr))
 				return
 			}
+
 			allowOverwrite := !plan.AllowOverwriteVersion.IsNull() && plan.AllowOverwriteVersion.ValueBool()
-			if exists && !allowOverwrite {
+			deleteExisting, createVersion, derr := decideRequestedVersionWrite(contentChanged, requestedVersion, requestedVersionChanged, exists, allowOverwrite)
+			if derr != "" {
 				resp.Diagnostics.AddError(
 					"Version already exists",
 					"The requested version already exists in Apicurio. Set allow_overwrite_version=true to delete and recreate that version.",
 				)
 				return
 			}
-			if exists && allowOverwrite {
+			if deleteExisting {
 				if derr := r.client.DeleteArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *requestedVersion); derr != nil {
 					resp.Diagnostics.AddError("Version delete failed", formatClientError("unable to delete existing version", derr))
 					return
 				}
 			}
-		}
-
-		if _, uerr := r.client.CreateArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), requestedVersion, content); uerr != nil {
-			resp.Diagnostics.AddError("Content update failed", formatClientError("unable to create new artifact version", uerr))
-			return
+			if createVersion {
+				if _, uerr := r.client.CreateArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), requestedVersion, content); uerr != nil {
+					resp.Diagnostics.AddError("Version create failed", formatClientError("unable to create new artifact version", uerr))
+					return
+				}
+				// Verify that the version now exists; otherwise fail rather than persisting a non-existent version to state.
+				created, verr := r.client.VersionExists(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), *requestedVersion)
+				if verr != nil {
+					resp.Diagnostics.AddError("Version verify failed", formatClientError("unable to verify artifact version existence after create", verr))
+					return
+				}
+				if !created {
+					resp.Diagnostics.AddError("Version verify failed", "apicurio did not report the requested version after create")
+					return
+				}
+			}
+		} else {
+			// No explicit version requested: only create a new version when content changes.
+			if contentChanged {
+				if _, uerr := r.client.CreateArtifactVersion(ctx, plan.GroupID.ValueString(), plan.ArtifactID.ValueString(), nil, content); uerr != nil {
+					resp.Diagnostics.AddError("Content update failed", formatClientError("unable to create new artifact version", uerr))
+					return
+				}
+			}
 		}
 	}
 
@@ -624,6 +643,64 @@ func resolveContentFromPlan(plan artifactResourceModel) ([]byte, diag.Diagnostic
 
 	diags.AddError("Invalid configuration", "Exactly one of content or content_file must be set")
 	return nil, diags
+}
+
+func requestedVersionFromModel(m artifactResourceModel) *string {
+	if m.Version.IsNull() || m.Version.IsUnknown() {
+		return nil
+	}
+	v := strings.TrimSpace(m.Version.ValueString())
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+func requestedVersionChanged(state artifactResourceModel, requestedVersion *string) bool {
+	if requestedVersion == nil {
+		return false
+	}
+	stateV := ""
+	if !state.Version.IsNull() && !state.Version.IsUnknown() {
+		stateV = strings.TrimSpace(state.Version.ValueString())
+	}
+	return stateV != strings.TrimSpace(*requestedVersion)
+}
+
+func shouldAttemptVersionWrite(contentChanged bool, requestedVersion *string, versionChanged bool) bool {
+	return contentChanged || (requestedVersion != nil && versionChanged)
+}
+
+// decideRequestedVersionWrite returns whether the provider should delete an existing requested
+// version (to overwrite it) and/or create a version.
+//
+// Semantics:
+// - If requestedVersion is nil: version creation is only needed when contentChanged.
+// - If requestedVersion is non-nil:
+//   - If the requested version exists and contentChanged:
+//   - allowOverwrite=false => error (can't safely rewrite an existing version)
+//   - allowOverwrite=true  => delete+create
+//   - If the requested version does not exist:
+//   - create when contentChanged OR when the requested version changed (version-only bump)
+//   - If the requested version exists and only the requested version changed:
+//   - no create needed (we can point state at the existing version)
+func decideRequestedVersionWrite(contentChanged bool, requestedVersion *string, versionChanged bool, versionExists bool, allowOverwrite bool) (deleteExisting bool, create bool, err string) {
+	if requestedVersion == nil {
+		return false, contentChanged, ""
+	}
+	if versionExists {
+		if contentChanged {
+			if !allowOverwrite {
+				return false, false, "version already exists"
+			}
+			return true, true, ""
+		}
+		return false, false, ""
+	}
+	if contentChanged || versionChanged {
+		return false, true, ""
+	}
+	return false, false, ""
 }
 
 func localContentHashFromPlan(plan artifactResourceModel) (string, diag.Diagnostics) {
